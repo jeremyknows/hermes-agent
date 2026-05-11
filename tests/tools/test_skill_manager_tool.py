@@ -20,6 +20,7 @@ from tools.skill_manager_tool import (
     _delete_skill,
     _write_file,
     _remove_file,
+    _surface_mutation_kind,
     skill_manage,
     VALID_NAME_RE,
     ALLOWED_SUBDIRS,
@@ -943,3 +944,92 @@ class TestPinnedGuard:
                        side_effect=RuntimeError("sidecar broken")):
                 result = _delete_skill("my-skill")
         assert result["success"] is True
+
+
+# ---------------------------------------------------------------------------
+# Atlas bus receipts for agent surface mutation
+# ---------------------------------------------------------------------------
+
+class TestAgentSurfaceMutationBus:
+    def test_skill_manage_success_emits_safe_surface_mutation_receipt(self, tmp_path, monkeypatch):
+        calls = []
+
+        def fake_run(args, **kwargs):
+            calls.append((args, kwargs))
+
+        monkeypatch.setenv("HERMES_ATLAS_AGENT", "sax")
+        monkeypatch.setenv("HERMES_PROFILE_NAME", "sax")
+        monkeypatch.setattr("tools.skill_manager_tool.subprocess.run", fake_run)
+        monkeypatch.setattr("tools.skill_manager_tool.Path.exists", lambda self: True)
+
+        with _skill_dir(tmp_path):
+            result = json.loads(skill_manage("create", "my-skill", content=VALID_SKILL_CONTENT))
+
+        assert result["success"] is True
+        assert len(calls) == 1
+        args, kwargs = calls[0]
+        assert args[:5] == [
+            "bash",
+            str(Path.home() / "projects/system-pipes/scripts/bus/emit-event.sh"),
+            "sax",
+            "agent_surface_mutated",
+            "sax surface mutation: skill_create succeeded for skill:my-skill",
+        ]
+        payload = json.loads(args[5])
+        assert payload == {
+            "schema_version": "0.1",
+            "runtime": "hermes",
+            "mutation_kind": "skill_create",
+            "outcome": "succeeded",
+            "affected_agent": "sax",
+            "originating_profile": "sax",
+            "artifact_kind": "skill",
+            "artifact_id": "skill:my-skill",
+            "summary": "Skill 'my-skill' created.",
+            "visibility": "safe_summary_only",
+        }
+        assert args[6] == "agent:sax"
+        assert kwargs["check"] is False
+
+    def test_skill_manage_bus_emit_failure_is_fail_open(self, tmp_path, monkeypatch):
+        def failing_run(*args, **kwargs):
+            raise RuntimeError("bus unavailable")
+
+        monkeypatch.setenv("HERMES_ATLAS_AGENT", "sax")
+        monkeypatch.setattr("tools.skill_manager_tool.subprocess.run", failing_run)
+        monkeypatch.setattr("tools.skill_manager_tool.Path.exists", lambda self: True)
+
+        with _skill_dir(tmp_path):
+            result = json.loads(skill_manage("create", "my-skill", content=VALID_SKILL_CONTENT))
+
+        assert result["success"] is True
+
+    def test_skill_manage_missing_bus_script_is_fail_open(self, tmp_path, monkeypatch):
+        calls = []
+
+        def fake_run(args, **kwargs):
+            calls.append((args, kwargs))
+
+        monkeypatch.setenv("HERMES_ATLAS_AGENT", "sax")
+        monkeypatch.setattr("tools.skill_manager_tool.subprocess.run", fake_run)
+        monkeypatch.setattr("tools.skill_manager_tool.Path.exists", lambda self: False)
+
+        with _skill_dir(tmp_path):
+            result = json.loads(skill_manage("create", "my-skill", content=VALID_SKILL_CONTENT))
+
+        assert result["success"] is True
+        assert calls == []
+
+    @pytest.mark.parametrize(
+        ("action", "expected"),
+        [
+            ("create", "skill_create"),
+            ("edit", "skill_update"),
+            ("patch", "skill_update"),
+            ("write_file", "skill_update"),
+            ("remove_file", "skill_update"),
+            ("delete", "skill_delete"),
+        ],
+    )
+    def test_surface_mutation_kind_maps_skill_actions(self, action, expected):
+        assert _surface_mutation_kind(action) == expected
