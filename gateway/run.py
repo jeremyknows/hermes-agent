@@ -7173,7 +7173,20 @@ class GatewayRunner:
                 message_text = await self._enrich_message_with_transcription(
                     message_text,
                     audio_paths,
+                    session_key=session_key,
                 )
+                _voice_transcripts_for_echo = getattr(self, "_voice_transcripts_by_session", {}).pop(session_key, [])
+                if _voice_transcripts_for_echo and source.platform == Platform.DISCORD:
+                    _stt_adapter_for_echo = self.adapters.get(source.platform)
+                    if _stt_adapter_for_echo:
+                        for _voice_transcript in _voice_transcripts_for_echo:
+                            try:
+                                await _stt_adapter_for_echo.send(
+                                    source.chat_id,
+                                    self._format_voice_transcript_echo_for_indexing(_voice_transcript),
+                                )
+                            except Exception:
+                                logger.debug("Failed to send visible voice transcript echo", exc_info=True)
                 _stt_fail_markers = (
                     "No STT provider",
                     "STT is disabled",
@@ -10445,10 +10458,26 @@ class GatewayRunner:
         recent_store[key] = recent[-5:]
         return False
 
+    def _format_voice_transcript_echo_for_indexing(self, transcript: str, user_id: Optional[int] = None) -> str:
+        """Format a visible transcript echo for Discord indexing without ellipsizing.
+
+        Voice messages are otherwise invisible to Discord text search / Discrawl.
+        Keep the full transcript subject only to Discord's message length limit;
+        do not add cosmetic previews with ``...`` because that loses the tail of
+        the user's actual ask.
+        """
+        safe_text = (transcript or "").strip()
+        safe_text = safe_text.replace("@everyone", "@\u200beveryone").replace("@here", "@\u200bhere")
+        if not safe_text:
+            safe_text = "_(empty or unreadable audio)_"
+        quoted = "\n> ".join(safe_text.splitlines())
+        user_suffix = f" <@{user_id}>" if user_id is not None else ""
+        return f"🎙️ **Voice Transcript:**{user_suffix}\n> {quoted}"
+
     async def _handle_voice_channel_input(
         self, guild_id: int, user_id: int, transcript: str
     ):
-        """Handle transcribed voice from a user in a voice channel.
+        """Handle transcribed speech from a Discord voice channel.
 
         Creates a synthetic MessageEvent and processes it through the
         adapter's full message pipeline (session, typing, agent, TTS reply).
@@ -10495,8 +10524,7 @@ class GatewayRunner:
         try:
             channel = adapter._client.get_channel(text_ch_id)
             if channel:
-                safe_text = transcript[:2000].replace("@everyone", "@\u200beveryone").replace("@here", "@\u200bhere")
-                await channel.send(f"**[Voice]** <@{user_id}>: {safe_text}")
+                await channel.send(self._format_voice_transcript_echo_for_indexing(transcript, user_id=user_id))
         except Exception:
             pass
 
@@ -13674,6 +13702,7 @@ class GatewayRunner:
         self,
         user_text: str,
         audio_paths: List[str],
+        session_key: Optional[str] = None,
     ) -> str:
         """
         Auto-transcribe user voice/audio messages using the configured STT provider
@@ -13701,12 +13730,14 @@ class GatewayRunner:
         from tools.transcription_tools import transcribe_audio
 
         enriched_parts = []
+        successful_transcripts = []
         for path in audio_paths:
             try:
                 logger.debug("Transcribing user voice: %s", path)
                 result = await asyncio.to_thread(transcribe_audio, path)
                 if result["success"]:
                     transcript = result["transcript"]
+                    successful_transcripts.append(transcript)
                     enriched_parts.append(
                         f'[The user sent a voice message~ '
                         f'Here\'s what they said: "{transcript}"]'
@@ -13744,6 +13775,12 @@ class GatewayRunner:
                 )
 
         if enriched_parts:
+            if session_key and successful_transcripts:
+                transcript_store = getattr(self, "_voice_transcripts_by_session", None)
+                if transcript_store is None:
+                    transcript_store = {}
+                    self._voice_transcripts_by_session = transcript_store
+                transcript_store[session_key] = list(successful_transcripts)
             prefix = "\n\n".join(enriched_parts)
             # Strip the empty-content placeholder from the Discord adapter
             # when we successfully transcribed the audio — it's redundant.

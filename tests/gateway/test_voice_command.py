@@ -986,6 +986,56 @@ class TestVoiceChannelCommands:
         assert "Test transcript" in msg
         assert "42" in msg  # user_id in mention
 
+    def test_voice_transcript_echo_uses_full_transcript(self, runner):
+        """Visible Discord transcript echo must not ellipsize long voice messages."""
+        long_transcript = "alpha " * 500
+
+        msg = runner._format_voice_transcript_echo_for_indexing(long_transcript)
+
+        assert msg.startswith("🎙️ **Voice Transcript:**\n> ")
+        assert long_transcript.strip() in msg
+        assert "..." not in msg
+        assert "@\u200beveryone" in runner._format_voice_transcript_echo_for_indexing("ping @everyone")
+
+    @pytest.mark.asyncio
+    async def test_audio_attachment_posts_full_transcript_echo(self, runner, monkeypatch):
+        """Discord audio attachments get a visible full transcript echo before agent reply."""
+        from gateway.config import Platform
+
+        source = SessionSource(
+            chat_id="123",
+            user_id="42",
+            user_name="Jeremy",
+            platform=Platform.DISCORD,
+            chat_type="group",
+        )
+        event = MessageEvent(
+            text="(The user sent a message with no text content)",
+            message_type=MessageType.VOICE,
+            source=source,
+            media_urls=["/tmp/voice.ogg"],
+            media_types=["audio/ogg"],
+        )
+        runner.config = SimpleNamespace(group_sessions_per_user=True, thread_sessions_per_user=False, stt_enabled=True)
+        runner._session_key_for_source = lambda _source: "discord:123:42"
+        runner._consume_pending_native_image_paths = lambda _session_key: []
+        runner._has_setup_skill = lambda: False
+        adapter = AsyncMock()
+        runner.adapters[Platform.DISCORD] = adapter
+        long_transcript = "full transcript tail " * 120
+        monkeypatch.setattr(
+            "tools.transcription_tools.transcribe_audio",
+            lambda _path: {"success": True, "transcript": long_transcript},
+        )
+
+        prepared = await runner._prepare_inbound_message_text(event=event, source=source, history=[])
+
+        adapter.send.assert_called_once()
+        echoed = adapter.send.call_args[0][1]
+        assert long_transcript.strip() in echoed
+        assert "..." not in echoed
+        assert long_transcript.strip() in prepared
+
     @pytest.mark.asyncio
     async def test_input_suppresses_duplicate_transcript(self, runner):
         """Near-immediate duplicate STT output should not dispatch twice."""
