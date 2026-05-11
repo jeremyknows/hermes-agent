@@ -471,6 +471,62 @@ def _reports_root() -> Path:
     return root
 
 
+def _cap_names(items: List[Any], limit: int = 20) -> List[str]:
+    """Return a small safe list of skill names for summary receipts."""
+    names: List[str] = []
+    for item in items or []:
+        if isinstance(item, dict):
+            name = item.get("name")
+        else:
+            name = item
+        if name:
+            names.append(str(name))
+        if len(names) >= limit:
+            break
+    return names
+
+
+def _emit_curator_run_surface_mutated(run_dir: Path, payload: Dict[str, Any]) -> None:
+    """Emit one safe-summary Atlas receipt for a completed curator report."""
+    try:
+        from agent.atlas_surface_receipts import emit_agent_surface_mutated
+
+        counts = payload.get("counts") or {}
+        auto_counts = payload.get("auto_transitions") or {}
+        report_rel = str(run_dir)
+        summary = (
+            "Hermes curator run completed: "
+            f"{counts.get('consolidated_this_run', 0)} consolidated, "
+            f"{counts.get('pruned_this_run', 0)} pruned, "
+            f"{counts.get('added_this_run', 0)} added, "
+            f"{counts.get('state_transitions', 0)} state transitions."
+        )
+        emit_agent_surface_mutated(
+            mutation_kind="curator_run",
+            artifact_kind="curator_run",
+            artifact_id=f"curator_run:{run_dir.name}",
+            summary=summary,
+            actor="curator_run",
+            extra={
+                "curator_run_id": run_dir.name,
+                "report_path": report_rel,
+                "duration_seconds": payload.get("duration_seconds"),
+                "model": payload.get("model"),
+                "provider": payload.get("provider"),
+                "counts": counts,
+                "auto_transitions": auto_counts,
+                "added_names": _cap_names(payload.get("added") or []),
+                "archived_names": _cap_names(payload.get("archived") or []),
+                "consolidated_names": _cap_names(payload.get("consolidated") or []),
+                "pruned_names": _cap_names(payload.get("pruned") or []),
+                "cron_jobs_rewritten": counts.get("cron_jobs_rewritten", 0),
+                "llm_error_present": bool(payload.get("llm_error")),
+            },
+        )
+    except Exception:
+        logger.debug("agent_surface_mutated curator emit failed", exc_info=True)
+
+
 def _needle_in_path_component(needle: str, path: str) -> bool:
     """Check if *needle* is a complete filename stem or directory name in *path*.
 
@@ -1156,6 +1212,8 @@ def _write_run_report(
     except Exception as e:
         logger.debug("Curator cron_rewrites.json write failed: %s", e)
 
+    _emit_curator_run_surface_mutated(run_dir, payload)
+
     return run_dir
 
 
@@ -1714,10 +1772,18 @@ def _run_llm_review(prompt: str) -> Dict[str, Any]:
         # terminal. The background-thread runner also hides it; this
         # belt-and-suspenders path matters when a caller invokes
         # run_curator_review(synchronous=True) from the CLI.
-        with open(os.devnull, "w", encoding="utf-8") as _devnull, \
-             contextlib.redirect_stdout(_devnull), \
-             contextlib.redirect_stderr(_devnull):
-            conv_result = review_agent.run_conversation(user_message=prompt)
+        previous_actor = os.environ.get("HERMES_ATLAS_ACTOR")
+        os.environ["HERMES_ATLAS_ACTOR"] = "curator_run"
+        try:
+            with open(os.devnull, "w", encoding="utf-8") as _devnull, \
+                 contextlib.redirect_stdout(_devnull), \
+                 contextlib.redirect_stderr(_devnull):
+                conv_result = review_agent.run_conversation(user_message=prompt)
+        finally:
+            if previous_actor is None:
+                os.environ.pop("HERMES_ATLAS_ACTOR", None)
+            else:
+                os.environ["HERMES_ATLAS_ACTOR"] = previous_actor
 
         final = ""
         if isinstance(conv_result, dict):
