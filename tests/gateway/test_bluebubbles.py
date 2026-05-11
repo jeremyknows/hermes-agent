@@ -125,6 +125,30 @@ class TestBlueBubblesHelpers:
         adapter = _make_adapter(monkeypatch, server_url="localhost:1234")
         assert adapter.server_url == "http://localhost:1234"
 
+    @pytest.mark.asyncio
+    async def test_register_webhook_only_subscribes_to_new_message(self, monkeypatch):
+        adapter = _make_adapter(monkeypatch)
+        adapter.client = object()
+        payloads = []
+
+        async def fake_find_registered_webhooks(webhook_url):
+            return []
+
+        async def fake_api_post(path, payload):
+            payloads.append((path, payload))
+            return {"status": 200, "message": "ok", "data": {"id": 1}}
+
+        monkeypatch.setattr(adapter, "_find_registered_webhooks", fake_find_registered_webhooks)
+        monkeypatch.setattr(adapter, "_api_post", fake_api_post)
+
+        assert await adapter._register_webhook() is True
+        assert payloads == [
+            (
+                "/api/v1/webhook",
+                {"url": adapter._webhook_register_url, "events": ["new-message"]},
+            )
+        ]
+
 
 class TestBlueBubblesWebhookParsing:
     def test_webhook_prefers_chat_guid_over_message_guid(self, monkeypatch):
@@ -289,6 +313,63 @@ class TestBlueBubblesGuidResolution:
         )
         assert result is None
 
+    def test_phone_resolution_prefers_direct_chat_over_group(self, monkeypatch):
+        adapter = _make_adapter(monkeypatch)
+        import asyncio
+
+        async def fake_api_post(path, payload):
+            assert path == "/api/v1/chat/query"
+            return {
+                "data": [
+                    {
+                        "guid": "iMessage;+;group-with-target",
+                        "participants": [
+                            {"address": "+17143362693"},
+                            {"address": "+17609366483"},
+                        ],
+                    },
+                    {
+                        "guid": "iMessage;-;+17143362693",
+                        "chatIdentifier": "+17143362693",
+                        "participants": [{"address": "+17143362693"}],
+                    },
+                ]
+            }
+
+        monkeypatch.setattr(adapter, "_api_post", fake_api_post)
+
+        result = asyncio.get_event_loop().run_until_complete(
+            adapter._resolve_chat_guid("+17143362693")
+        )
+
+        assert result == "iMessage;-;+17143362693"
+
+    def test_phone_resolution_refuses_group_only_match(self, monkeypatch):
+        adapter = _make_adapter(monkeypatch)
+        import asyncio
+
+        async def fake_api_post(path, payload):
+            assert path == "/api/v1/chat/query"
+            return {
+                "data": [
+                    {
+                        "guid": "iMessage;+;group-with-target",
+                        "participants": [
+                            {"address": "+17143362693"},
+                            {"address": "+17609366483"},
+                        ],
+                    }
+                ]
+            }
+
+        monkeypatch.setattr(adapter, "_api_post", fake_api_post)
+
+        result = asyncio.get_event_loop().run_until_complete(
+            adapter._resolve_chat_guid("+17143362693")
+        )
+
+        assert result is None
+
 
 class TestBlueBubblesAttachmentDownload:
     """Verify _download_attachment routes to the correct cache helper."""
@@ -418,18 +499,22 @@ class TestBlueBubblesAttachmentDownload:
 
 
 class TestBlueBubblesWebhookUrl:
-    """_webhook_url property normalises local hosts to 'localhost'."""
+    """_webhook_url property preserves the explicit loopback host."""
 
     def test_default_host(self, monkeypatch):
         adapter = _make_adapter(monkeypatch)
-        # Default webhook_host is 0.0.0.0 → normalized to localhost
-        assert "localhost" in adapter._webhook_url
+        # Default webhook_host is 0.0.0.0 → normalized to 127.0.0.1
+        assert "127.0.0.1" in adapter._webhook_url
         assert str(adapter.webhook_port) in adapter._webhook_url
         assert adapter.webhook_path in adapter._webhook_url
 
-    @pytest.mark.parametrize("host", ["0.0.0.0", "127.0.0.1", "localhost", "::"])
-    def test_local_hosts_normalized(self, monkeypatch, host):
+    @pytest.mark.parametrize("host", ["0.0.0.0", "127.0.0.1", "::"])
+    def test_loopback_hosts_normalized_to_127_0_0_1(self, monkeypatch, host):
         adapter = _make_adapter(monkeypatch, webhook_host=host)
+        assert adapter._webhook_url.startswith("http://127.0.0.1:")
+
+    def test_localhost_preserved(self, monkeypatch):
+        adapter = _make_adapter(monkeypatch, webhook_host="localhost")
         assert adapter._webhook_url.startswith("http://localhost:")
 
     def test_custom_host_preserved(self, monkeypatch):
@@ -594,6 +679,31 @@ class TestBlueBubblesWebhookRegistration:
         )
         assert ok is True
         assert not post_called, "Should reuse existing, not POST again"
+
+    def test_register_refreshes_stale_existing(self, monkeypatch):
+        """If the webhook exists but still subscribes to updated-message, refresh it."""
+        import asyncio
+        adapter = _make_adapter(monkeypatch)
+        url = adapter._webhook_register_url
+        adapter.client = self._mock_client(
+            get_response={"status": 200, "data": [
+                {"id": 7, "url": url, "events": ["new-message", "updated-message"]},
+            ]},
+            post_response={"status": 200, "data": {"id": 42}},
+        )
+
+        unregistered = False
+        async def tracking_unregister():
+            nonlocal unregistered
+            unregistered = True
+            return True
+        adapter._unregister_webhook = tracking_unregister
+
+        ok = asyncio.get_event_loop().run_until_complete(
+            adapter._register_webhook()
+        )
+        assert ok is True
+        assert unregistered is True
 
     def test_register_returns_false_without_client(self, monkeypatch):
         import asyncio

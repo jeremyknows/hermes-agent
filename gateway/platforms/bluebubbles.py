@@ -221,10 +221,15 @@ class BlueBubblesAdapter(BasePlatformAdapter):
 
     @property
     def _webhook_url(self) -> str:
-        """Compute the external webhook URL for BlueBubbles registration."""
+        """Compute the external webhook URL for BlueBubbles registration.
+
+        Prefer the exact configured loopback host when possible so the
+        registered URL matches the listening host one-to-one. Only fall back
+        to 127.0.0.1 when the listener is bound to an unspecified address.
+        """
         host = self.webhook_host
-        if host in ("0.0.0.0", "127.0.0.1", "localhost", "::"):
-            host = "localhost"
+        if host in ("0.0.0.0", "::"):
+            host = "127.0.0.1"
         return f"http://{host}:{self.webhook_port}{self.webhook_path}"
 
     @property
@@ -268,14 +273,23 @@ class BlueBubblesAdapter(BasePlatformAdapter):
         # Crash resilience — reuse an existing registration if present
         existing = await self._find_registered_webhooks(webhook_url)
         if existing:
+            if all((wh.get("events") or []) == ["new-message"] for wh in existing):
+                logger.info(
+                    "[bluebubbles] webhook already registered: %s", webhook_url
+                )
+                return True
+
             logger.info(
-                "[bluebubbles] webhook already registered: %s", webhook_url
+                "[bluebubbles] refreshing stale webhook registration: %s",
+                webhook_url,
             )
-            return True
+            await self._unregister_webhook()
 
         payload = {
             "url": webhook_url,
-            "events": ["new-message", "updated-message"],
+            # Register only the creation event to avoid duplicate replies when
+            # BlueBubbles also emits updated-message for the same incoming SMS.
+            "events": ["new-message"],
         }
 
         try:
@@ -358,17 +372,53 @@ class BlueBubblesAdapter(BasePlatformAdapter):
                 "/api/v1/chat/query",
                 {"limit": 100, "offset": 0, "with": ["participants"]},
             )
-            for chat in payload.get("data", []) or []:
+            chats = payload.get("data", []) or []
+
+            # Prefer exact 1:1 chat identifiers before participant matches.
+            # BlueBubbles group chats list every participant; resolving a phone
+            # number by "first participant match" can accidentally select a
+            # group containing that person instead of the direct thread.
+            for chat in chats:
                 guid = chat.get("guid") or chat.get("chatGuid")
                 identifier = chat.get("chatIdentifier") or chat.get("identifier")
                 if identifier == target:
                     if guid:
                         self._guid_cache[target] = guid
                     return guid
-                for part in chat.get("participants", []) or []:
-                    if (part.get("address") or "").strip() == target and guid:
-                        self._guid_cache[target] = guid
-                        return guid
+
+            one_to_one_matches: List[str] = []
+            group_matches: List[str] = []
+            for chat in chats:
+                guid = chat.get("guid") or chat.get("chatGuid")
+                if not guid:
+                    continue
+                participants = chat.get("participants", []) or []
+                for part in participants:
+                    if (part.get("address") or "").strip() == target:
+                        if len(participants) <= 1:
+                            one_to_one_matches.append(guid)
+                        else:
+                            group_matches.append(guid)
+                        break
+
+            if one_to_one_matches:
+                self._guid_cache[target] = one_to_one_matches[0]
+                return one_to_one_matches[0]
+
+            if len(group_matches) == 1:
+                logger.warning(
+                    "[bluebubbles] resolved %s only via a group chat; refusing "
+                    "implicit group target. Use the raw chat GUID to target a "
+                    "group intentionally.",
+                    target,
+                )
+            elif group_matches:
+                logger.warning(
+                    "[bluebubbles] resolved %s via %d group chats and no direct "
+                    "thread; refusing ambiguous group target.",
+                    target,
+                    len(group_matches),
+                )
         except Exception:
             pass
         return None

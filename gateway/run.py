@@ -5991,6 +5991,21 @@ class GatewayRunner:
                     message_text,
                     audio_paths,
                 )
+                _voice_transcript_echo = self._format_voice_transcript_echo_for_indexing(message_text)
+                _voice_source_platform = getattr(source, "platform", None)
+                _voice_platform = getattr(_voice_source_platform, "value", _voice_source_platform)
+                if _voice_transcript_echo and str(_voice_platform).lower() == "discord":
+                    _voice_adapter = self.adapters.get(source.platform)
+                    _voice_meta = {"thread_id": source.thread_id} if source.thread_id else None
+                    if _voice_adapter:
+                        try:
+                            await _voice_adapter.send(
+                                source.chat_id,
+                                _voice_transcript_echo,
+                                metadata=_voice_meta,
+                            )
+                        except Exception as exc:
+                            logger.debug("voice transcript echo send failed: %s", exc)
                 _stt_fail_markers = (
                     "No STT provider",
                     "STT is disabled",
@@ -12001,6 +12016,34 @@ class GatewayRunner:
                 return f"{prefix}\n\n{user_text}"
             return prefix
         return user_text
+
+    @staticmethod
+    def _format_voice_transcript_echo_for_indexing(message_text: str) -> str:
+        """Return a Discord-indexable transcript block from STT-enriched text.
+
+        `_enrich_message_with_transcription()` prepends an internal note for the
+        model so the agent can answer a voice message. Discord/Discrawl cannot
+        see that internal prompt, though, so the gateway also needs to echo the
+        transcript as visible chat text before the model response.
+        """
+        if not message_text or "The user sent a voice message~" not in message_text:
+            return ""
+        pattern = re.compile(
+            r"\[The user sent a voice message~ Here's what they said: \"(.*?)\"\]",
+            re.DOTALL,
+        )
+        transcripts = [m.strip() for m in pattern.findall(message_text) if m.strip()]
+        if not transcripts:
+            return ""
+
+        blocks = []
+        for idx, transcript in enumerate(transcripts, start=1):
+            label = "🎙️ **Voice Transcript:**"
+            if len(transcripts) > 1:
+                label = f"🎙️ **Voice Transcript ({idx}):**"
+            quoted = "\n".join(f"> {line}" if line else ">" for line in transcript.splitlines())
+            blocks.append(f"{label}\n{quoted}")
+        return "\n\n".join(blocks)
 
     async def _enrich_message_with_transcription(
         self,

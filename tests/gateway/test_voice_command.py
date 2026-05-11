@@ -2846,3 +2846,85 @@ class TestShouldAutoTtsForChat:
         fn, adapter = self._make_adapter(default=False, enabled={"chat1"})
         assert fn(adapter, "chat1") is True
         assert fn(adapter, "chat2") is False
+
+
+# =====================================================================
+# Voice transcript echo — keep Discord voice-note content searchable
+# =====================================================================
+
+class TestVoiceTranscriptEcho:
+    def test_formats_single_transcript_for_discrawl_indexing(self):
+        from gateway.run import GatewayRunner
+
+        message = '[The user sent a voice message~ Here\'s what they said: "line one\nline two"]'
+
+        assert GatewayRunner._format_voice_transcript_echo_for_indexing(message) == (
+            "🎙️ **Voice Transcript:**\n> line one\n> line two"
+        )
+
+    def test_formats_multiple_transcripts_for_discrawl_indexing(self):
+        from gateway.run import GatewayRunner
+
+        message = (
+            '[The user sent a voice message~ Here\'s what they said: "first"]\n\n'
+            '[The user sent a voice message~ Here\'s what they said: "second"]'
+        )
+
+        assert GatewayRunner._format_voice_transcript_echo_for_indexing(message) == (
+            "🎙️ **Voice Transcript (1):**\n> first\n\n"
+            "🎙️ **Voice Transcript (2):**\n> second"
+        )
+
+    @pytest.mark.asyncio
+    async def test_prepare_inbound_echoes_transcript_to_discord_before_agent(self):
+        from gateway.run import GatewayRunner
+        from gateway.session import Platform
+
+        class FakeAdapter:
+            def __init__(self):
+                self.calls = []
+
+            async def send(self, chat_id, text, metadata=None):
+                self.calls.append((chat_id, text, metadata))
+                return SimpleNamespace(success=True)
+
+        runner = object.__new__(GatewayRunner)
+        runner.config = SimpleNamespace(
+            group_sessions_per_user=True,
+            thread_sessions_per_user=False,
+            stt_enabled=True,
+        )
+        adapter = FakeAdapter()
+        runner.adapters = {Platform.DISCORD: adapter}
+        runner._consume_pending_native_image_paths = lambda session_key: []
+        runner._session_key_for_source = lambda source: "test-session"
+
+        async def fake_enrich(user_text, audio_paths):
+            return '[The user sent a voice message~ Here\'s what they said: "hello world"]'
+
+        runner._enrich_message_with_transcription = fake_enrich
+        event = MessageEvent(
+            text="",
+            message_type=MessageType.VOICE,
+            media_urls=["/tmp/a.ogg"],
+            media_types=["audio/ogg"],
+        )
+        source = SimpleNamespace(
+            platform=Platform.DISCORD,
+            chat_type="group",
+            chat_id="channel-1",
+            thread_id="thread-1",
+            user_name=None,
+            user_id="user-1",
+        )
+
+        prepared = await runner._prepare_inbound_message_text(event=event, source=source, history=[])
+
+        assert prepared == '[The user sent a voice message~ Here\'s what they said: "hello world"]'
+        assert adapter.calls == [
+            (
+                "channel-1",
+                "🎙️ **Voice Transcript:**\n> hello world",
+                {"thread_id": "thread-1"},
+            )
+        ]
