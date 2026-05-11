@@ -48,6 +48,48 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+
+def _memory_artifact_id(target: str) -> str:
+    return "memory:user" if target == "user" else "memory:memory"
+
+
+def _memory_surface_summary(action: str, target: str) -> str:
+    store_name = "USER.md" if target == "user" else "MEMORY.md"
+    return f"Hermes memory surface updated: {action} on {store_name}."
+
+
+def _emit_memory_surface_mutated(
+    action: str,
+    target: str,
+    *,
+    entry_count: int,
+    usage_chars: int,
+    usage_limit_chars: int,
+    content_char_count: int = None,
+    old_text_char_count: int = None,
+) -> None:
+    """Best-effort Atlas bus receipt for durable MEMORY.md / USER.md mutations."""
+    try:
+        from agent.atlas_surface_receipts import emit_agent_surface_mutated
+
+        emit_agent_surface_mutated(
+            mutation_kind="memory_write",
+            artifact_kind="memory",
+            artifact_id=_memory_artifact_id(target),
+            summary=_memory_surface_summary(action, target),
+            extra={
+                "memory_target": target,
+                "memory_action": action,
+                "entry_count": entry_count,
+                "usage_chars": usage_chars,
+                "usage_limit_chars": usage_limit_chars,
+                "content_char_count": content_char_count,
+                "old_text_char_count": old_text_char_count,
+            },
+        )
+    except Exception:
+        logger.debug("agent_surface_mutated memory emit failed", exc_info=True)
+
 # Where memory files live — resolved dynamically so profile overrides
 # (HERMES_HOME env var changes) are always respected.  The old module-level
 # constant was cached at import time and could go stale if a profile switch
@@ -260,6 +302,14 @@ class MemoryStore:
             entries.append(content)
             self._set_entries(target, entries)
             self.save_to_disk(target)
+            _emit_memory_surface_mutated(
+                "add",
+                target,
+                entry_count=len(entries),
+                usage_chars=self._char_count(target),
+                usage_limit_chars=self._char_limit(target),
+                content_char_count=len(content),
+            )
 
         return self._success_response(target, "Entry added.")
 
@@ -318,6 +368,15 @@ class MemoryStore:
             entries[idx] = new_content
             self._set_entries(target, entries)
             self.save_to_disk(target)
+            _emit_memory_surface_mutated(
+                "replace",
+                target,
+                entry_count=len(entries),
+                usage_chars=self._char_count(target),
+                usage_limit_chars=self._char_limit(target),
+                content_char_count=len(new_content),
+                old_text_char_count=len(old_text),
+            )
 
         return self._success_response(target, "Entry replaced.")
 
@@ -349,9 +408,18 @@ class MemoryStore:
                 # All identical -- safe to remove just the first
 
             idx = matches[0][0]
-            entries.pop(idx)
+            removed = entries.pop(idx)
             self._set_entries(target, entries)
             self.save_to_disk(target)
+            _emit_memory_surface_mutated(
+                "remove",
+                target,
+                entry_count=len(entries),
+                usage_chars=self._char_count(target),
+                usage_limit_chars=self._char_limit(target),
+                old_text_char_count=len(old_text),
+                content_char_count=len(removed),
+            )
 
         return self._success_response(target, "Entry removed.")
 

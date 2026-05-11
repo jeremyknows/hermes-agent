@@ -37,7 +37,6 @@ import logging
 import os
 import re
 import shutil
-import subprocess
 import tempfile
 from pathlib import Path
 from hermes_constants import get_hermes_home, display_hermes_home
@@ -715,67 +714,16 @@ def _surface_mutation_kind(action: str) -> str:
     return "skill_update"
 
 
-def _originating_profile_name() -> str:
-    explicit = os.getenv("HERMES_PROFILE_NAME") or os.getenv("HERMES_PROFILE")
-    if explicit:
-        return explicit
-    home = get_hermes_home()
-    if home.parent.name == "profiles":
-        return home.name
-    return "default"
-
-
-def _atlas_agent_name() -> str:
-    env_name = os.getenv("HERMES_ATLAS_AGENT") or os.getenv("ATLAS_AGENT")
-    if env_name:
-        return env_name
-    try:
-        from hermes_cli.config import load_config
-        cfg = load_config()
-        configured = cfg_get(cfg, "atlas", "agent_name")
-        if configured:
-            return str(configured)
-    except Exception:
-        pass
-    profile = _originating_profile_name()
-    return profile if profile != "default" else "hermes"
-
-
 def _emit_agent_surface_mutated(action: str, name: str, result: Dict[str, Any]) -> None:
     """Best-effort Atlas bus receipt for successful skill surface mutations."""
-    emit_path = Path(os.path.expanduser("~/projects/system-pipes/scripts/bus/emit-event.sh"))
-    if not emit_path.exists():
-        return
-    actor = _atlas_agent_name()
-    profile = _originating_profile_name()
+    from agent.atlas_surface_receipts import emit_agent_surface_mutated
+
     mutation_kind = _surface_mutation_kind(action)
-    data = {
-        "schema_version": "0.1",
-        "runtime": "hermes",
-        "mutation_kind": mutation_kind,
-        "outcome": "succeeded",
-        "affected_agent": actor,
-        "originating_profile": profile,
-        "artifact_kind": "skill",
-        "artifact_id": f"skill:{name}",
-        "summary": result.get("message", f"Skill '{name}' changed."),
-        "visibility": "safe_summary_only",
-    }
-    message = f"{actor} surface mutation: {mutation_kind} succeeded for skill:{name}"
-    subprocess.run(
-        [
-            "bash",
-            str(emit_path),
-            actor,
-            "agent_surface_mutated",
-            message,
-            json.dumps(data, ensure_ascii=False, separators=(",", ":")),
-            f"agent:{actor}",
-        ],
-        check=False,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        timeout=5,
+    emit_agent_surface_mutated(
+        mutation_kind=mutation_kind,
+        artifact_kind="skill",
+        artifact_id=f"skill:{name}",
+        summary=result.get("message", f"Skill '{name}' changed."),
     )
 
 

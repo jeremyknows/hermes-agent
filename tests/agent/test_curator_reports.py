@@ -83,6 +83,61 @@ def test_write_run_report_creates_both_files(curator_env):
     assert run_dir.parent == curator._reports_root()
 
 
+def test_write_run_report_emits_safe_curator_run_receipt(curator_env, monkeypatch):
+    """Curator reports emit one safe aggregate Atlas receipt for bus parity."""
+    curator = curator_env["curator"]
+    calls = []
+
+    def fake_run(args, **kwargs):
+        calls.append((args, kwargs))
+
+    monkeypatch.setenv("HERMES_ATLAS_AGENT", "sax")
+    monkeypatch.setenv("HERMES_PROFILE_NAME", "sax")
+    emit_path = curator_env["home"].parent / "projects" / "system-pipes" / "scripts" / "bus" / "emit-event.sh"
+    emit_path.parent.mkdir(parents=True, exist_ok=True)
+    emit_path.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "agent.atlas_surface_receipts.os.path.expanduser",
+        lambda p: str(emit_path) if p == "~/projects/system-pipes/scripts/bus/emit-event.sh" else os.path.expanduser(p),
+    )
+    monkeypatch.setattr("agent.atlas_surface_receipts.subprocess.run", fake_run)
+
+    run_dir = curator._write_run_report(
+        started_at=datetime(2026, 5, 10, 12, 0, 0, tzinfo=timezone.utc),
+        elapsed_seconds=12.345,
+        auto_counts={"checked": 5, "marked_stale": 1, "archived": 0, "reactivated": 0},
+        auto_summary="1 marked stale",
+        before_report=[{"name": "old-secret-skill", "state": "active", "pinned": False}],
+        before_names={"old-secret-skill"},
+        after_report=[{"name": "new-umbrella", "state": "active", "pinned": False}],
+        llm_meta=_make_llm_meta(
+            final="SECRET_DO_NOT_LEAK full curator reasoning",
+            tool_calls=[{"name": "skill_manage", "arguments": '{"action":"delete"}'}],
+        ),
+    )
+
+    assert run_dir is not None
+    assert len(calls) == 1
+    args, kwargs = calls[0]
+    assert args[2] == "curator_run"
+    assert args[3] == "agent_surface_mutated"
+    assert args[4].startswith("curator_run surface mutation: curator_run succeeded")
+    assert args[6] == "agent:sax"
+    payload = json.loads(args[5])
+    assert payload["mutation_kind"] == "curator_run"
+    assert payload["artifact_kind"] == "curator_run"
+    assert payload["affected_agent"] == "sax"
+    assert payload["originating_profile"] == "sax"
+    assert payload["visibility"] == "safe_summary_only"
+    assert payload["counts"]["added_this_run"] == 1
+    assert payload["counts"]["archived_this_run"] == 1
+    assert payload["added_names"] == ["new-umbrella"]
+    assert payload["archived_names"] == ["old-secret-skill"]
+    serialized = json.dumps(payload) + args[4]
+    assert "SECRET_DO_NOT_LEAK" not in serialized
+    assert kwargs["check"] is False
+
+
 def test_run_json_has_expected_shape(curator_env):
     """run.json must carry the machine-readable fields downstream tooling needs."""
     curator = curator_env["curator"]

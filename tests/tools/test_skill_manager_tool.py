@@ -959,8 +959,8 @@ class TestAgentSurfaceMutationBus:
 
         monkeypatch.setenv("HERMES_ATLAS_AGENT", "sax")
         monkeypatch.setenv("HERMES_PROFILE_NAME", "sax")
-        monkeypatch.setattr("tools.skill_manager_tool.subprocess.run", fake_run)
-        monkeypatch.setattr("tools.skill_manager_tool.Path.exists", lambda self: True)
+        monkeypatch.setattr("agent.atlas_surface_receipts.subprocess.run", fake_run)
+        monkeypatch.setattr("agent.atlas_surface_receipts.Path.exists", lambda self: True)
 
         with _skill_dir(tmp_path):
             result = json.loads(skill_manage("create", "my-skill", content=VALID_SKILL_CONTENT))
@@ -996,8 +996,8 @@ class TestAgentSurfaceMutationBus:
             raise RuntimeError("bus unavailable")
 
         monkeypatch.setenv("HERMES_ATLAS_AGENT", "sax")
-        monkeypatch.setattr("tools.skill_manager_tool.subprocess.run", failing_run)
-        monkeypatch.setattr("tools.skill_manager_tool.Path.exists", lambda self: True)
+        monkeypatch.setattr("agent.atlas_surface_receipts.subprocess.run", failing_run)
+        monkeypatch.setattr("agent.atlas_surface_receipts.Path.exists", lambda self: True)
 
         with _skill_dir(tmp_path):
             result = json.loads(skill_manage("create", "my-skill", content=VALID_SKILL_CONTENT))
@@ -1011,14 +1011,38 @@ class TestAgentSurfaceMutationBus:
             calls.append((args, kwargs))
 
         monkeypatch.setenv("HERMES_ATLAS_AGENT", "sax")
-        monkeypatch.setattr("tools.skill_manager_tool.subprocess.run", fake_run)
-        monkeypatch.setattr("tools.skill_manager_tool.Path.exists", lambda self: False)
+        monkeypatch.setattr("agent.atlas_surface_receipts.subprocess.run", fake_run)
+        monkeypatch.setattr("agent.atlas_surface_receipts.Path.exists", lambda self: False)
 
         with _skill_dir(tmp_path):
             result = json.loads(skill_manage("create", "my-skill", content=VALID_SKILL_CONTENT))
 
         assert result["success"] is True
         assert calls == []
+
+    def test_skill_manage_preserves_actor_affected_agent_split(self, tmp_path, monkeypatch):
+        calls = []
+
+        def fake_run(args, **kwargs):
+            calls.append((args, kwargs))
+
+        monkeypatch.setenv("HERMES_ATLAS_ACTOR", "curator_run")
+        monkeypatch.setenv("HERMES_ATLAS_AGENT", "sax")
+        monkeypatch.setenv("HERMES_PROFILE_NAME", "sax")
+        monkeypatch.setattr("agent.atlas_surface_receipts.subprocess.run", fake_run)
+        monkeypatch.setattr("agent.atlas_surface_receipts.Path.exists", lambda self: True)
+
+        with _skill_dir(tmp_path):
+            result = json.loads(skill_manage("create", "my-skill", content=VALID_SKILL_CONTENT))
+
+        assert result["success"] is True
+        args, _ = calls[0]
+        assert args[2] == "curator_run"
+        assert args[4] == "curator_run surface mutation: skill_create succeeded for skill:my-skill"
+        assert args[6] == "agent:sax"
+        payload = json.loads(args[5])
+        assert payload["affected_agent"] == "sax"
+        assert payload["originating_profile"] == "sax"
 
     @pytest.mark.parametrize(
         ("action", "expected"),
