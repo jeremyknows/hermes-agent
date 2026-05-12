@@ -986,6 +986,27 @@ class TestVoiceChannelCommands:
         assert "Test transcript" in msg
         assert "42" in msg  # user_id in mention
 
+    @pytest.mark.asyncio
+    async def test_input_splits_long_transcript_echo(self, runner):
+        """Long Discord VC transcript echoes are split, not truncated or ellipsized."""
+        from gateway.config import Platform
+        mock_adapter = AsyncMock()
+        mock_adapter._voice_text_channels = {111: 123}
+        mock_adapter._voice_sources = {}
+        mock_adapter._client = MagicMock()
+        mock_channel = AsyncMock()
+        mock_adapter._client.get_channel = MagicMock(return_value=mock_channel)
+        mock_adapter.handle_message = AsyncMock()
+        runner.adapters[Platform.DISCORD] = mock_adapter
+        long_transcript = ("alpha " * 450) + "UNIQUE_TAIL"
+
+        await runner._handle_voice_channel_input(111, 42, long_transcript)
+
+        assert mock_channel.send.call_count > 1
+        sent = "".join(call.args[0] for call in mock_channel.send.call_args_list)
+        assert "UNIQUE_TAIL" in sent
+        assert "..." not in sent
+
     def test_voice_transcript_echo_uses_full_transcript(self, runner):
         """Visible Discord transcript echo must not ellipsize long voice messages."""
         long_transcript = "alpha " * 500
@@ -1030,8 +1051,8 @@ class TestVoiceChannelCommands:
 
         prepared = await runner._prepare_inbound_message_text(event=event, source=source, history=[])
 
-        adapter.send.assert_called_once()
-        echoed = adapter.send.call_args[0][1]
+        assert adapter.send.call_count > 1
+        echoed = "".join(call.args[1] for call in adapter.send.call_args_list)
         assert long_transcript.strip() in echoed
         assert "..." not in echoed
         assert long_transcript.strip() in prepared

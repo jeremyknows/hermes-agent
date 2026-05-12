@@ -7181,12 +7181,13 @@ class GatewayRunner:
                     if _stt_adapter_for_echo:
                         for _voice_transcript in _voice_transcripts_for_echo:
                             try:
-                                await _stt_adapter_for_echo.send(
+                                await self._send_discord_voice_transcript_echo(
+                                    _stt_adapter_for_echo,
                                     source.chat_id,
-                                    self._format_voice_transcript_echo_for_indexing(_voice_transcript),
+                                    _voice_transcript,
                                 )
                             except Exception:
-                                logger.debug("Failed to send visible voice transcript echo", exc_info=True)
+                                logger.warning("Failed to send visible voice transcript echo", exc_info=True)
                 _stt_fail_markers = (
                     "No STT provider",
                     "STT is disabled",
@@ -10474,6 +10475,53 @@ class GatewayRunner:
         user_suffix = f" <@{user_id}>" if user_id is not None else ""
         return f"🎙️ **Voice Transcript:**{user_suffix}\n> {quoted}"
 
+    def _split_discord_transcript_echo(self, message: str, max_length: int = 2000) -> List[str]:
+        """Split transcript echoes without adding ellipses or pagination text."""
+        if len(message) <= max_length:
+            return [message]
+        chunks: List[str] = []
+        remaining = message
+        while remaining:
+            if len(remaining) <= max_length:
+                chunks.append(remaining)
+                break
+            window = remaining[:max_length]
+            split_at = window.rfind("\n")
+            if split_at < max_length // 2:
+                split_at = window.rfind(" ")
+            if split_at < 1:
+                split_at = max_length
+            else:
+                split_at += 1  # preserve the delimiter instead of dropping text
+            chunks.append(remaining[:split_at])
+            remaining = remaining[split_at:]
+        return chunks
+
+    async def _send_discord_voice_transcript_echo(
+        self,
+        adapter: Any,
+        chat_id: str,
+        transcript: str,
+        *,
+        user_id: Optional[int] = None,
+        channel: Any = None,
+    ) -> None:
+        """Send a visible Discord transcript echo without truncating long text.
+
+        ``channel.send`` does not go through the Discord adapter's normal split
+        path, so voice-channel transcript echoes must split explicitly before
+        hitting Discord's 2000-character API limit.
+        """
+        message = self._format_voice_transcript_echo_for_indexing(transcript, user_id=user_id)
+        adapter_max_len = getattr(adapter, "MAX_MESSAGE_LENGTH", None)
+        max_len = adapter_max_len if isinstance(adapter_max_len, int) and adapter_max_len > 0 else 2000
+        chunks = self._split_discord_transcript_echo(message, max_length=max_len)
+        for chunk in chunks:
+            if channel is not None:
+                await channel.send(chunk)
+            else:
+                await adapter.send(chat_id, chunk)
+
     async def _handle_voice_channel_input(
         self, guild_id: int, user_id: int, transcript: str
     ):
@@ -10524,9 +10572,15 @@ class GatewayRunner:
         try:
             channel = adapter._client.get_channel(text_ch_id)
             if channel:
-                await channel.send(self._format_voice_transcript_echo_for_indexing(transcript, user_id=user_id))
+                await self._send_discord_voice_transcript_echo(
+                    adapter,
+                    str(text_ch_id),
+                    transcript,
+                    user_id=user_id,
+                    channel=channel,
+                )
         except Exception:
-            pass
+            logger.warning("Failed to send Discord voice-channel transcript echo", exc_info=True)
 
         # Build a synthetic MessageEvent and feed through the normal pipeline
         # Use SimpleNamespace as raw_message so _get_guild_id() can extract
