@@ -53,8 +53,12 @@ _TAPBACK_REMOVED = {
     3003: "laugh", 3004: "emphasize", 3005: "question",
 }
 
-# Webhook event types that carry user messages
-_MESSAGE_EVENTS = {"new-message", "message", "updated-message"}
+# Webhook event types that carry user messages.
+# Do not consume BlueBubbles "updated-message" events here: those are edit/update
+# notifications for the same message GUID and can double-trigger auto replies when
+# the server registration includes both new-message and updated-message.
+_MESSAGE_EVENTS = {"new-message", "message"}
+_MAX_RECENT_MESSAGE_IDS = 512
 
 # Log redaction patterns
 _PHONE_RE = re.compile(r"\+?\d{7,15}")
@@ -129,6 +133,7 @@ class BlueBubblesAdapter(BasePlatformAdapter):
         self._private_api_enabled: Optional[bool] = None
         self._helper_connected: bool = False
         self._guid_cache: Dict[str, str] = {}
+        self._recent_message_ids: Dict[str, None] = {}
 
     # ------------------------------------------------------------------
     # API helpers
@@ -221,10 +226,16 @@ class BlueBubblesAdapter(BasePlatformAdapter):
 
     @property
     def _webhook_url(self) -> str:
-        """Compute the external webhook URL for BlueBubbles registration."""
+        """Compute the external webhook URL for BlueBubbles registration.
+
+        Preserve the configured loopback host literally. BlueBubbles stores the
+        callback URL as an exact string, so normalizing ``127.0.0.1`` to
+        ``localhost`` creates a second registration instead of reusing the
+        existing one on machines configured with the numeric loopback address.
+        """
         host = self.webhook_host
-        if host in {"0.0.0.0", "127.0.0.1", "localhost", "::"}:
-            host = "localhost"
+        if host in {"0.0.0.0", "::"}:
+            host = DEFAULT_WEBHOOK_HOST
         return f"http://{host}:{self.webhook_port}{self.webhook_path}"
 
     @property
@@ -264,18 +275,44 @@ class BlueBubblesAdapter(BasePlatformAdapter):
             return False
 
         webhook_url = self._webhook_register_url
+        desired_events = ["new-message"]
 
-        # Crash resilience — reuse an existing registration if present
+        # Crash resilience — reuse a clean existing registration if present.
+        # If a stale registration still includes updated-message, replace it so a
+        # clean restart cannot reintroduce duplicate auto-replies.
         existing = await self._find_registered_webhooks(webhook_url)
         if existing:
-            logger.info(
-                "[bluebubbles] webhook already registered: %s", webhook_url
-            )
-            return True
+            clean = [wh for wh in existing if wh.get("events") == desired_events]
+            stale = [wh for wh in existing if wh.get("events") != desired_events]
+            if stale:
+                for wh in stale:
+                    wh_id = wh.get("id")
+                    if wh_id:
+                        try:
+                            res = await self.client.delete(
+                                self._api_url(f"/api/v1/webhook/{wh_id}")
+                            )
+                            res.raise_for_status()
+                        except Exception as exc:
+                            logger.warning(
+                                "[bluebubbles] failed to remove stale webhook %s: %s",
+                                wh_id,
+                                exc,
+                            )
+                            return False
+                logger.info(
+                    "[bluebubbles] removed stale webhook registrations for: %s",
+                    webhook_url,
+                )
+            if clean:
+                logger.info(
+                    "[bluebubbles] webhook already registered: %s", webhook_url
+                )
+                return True
 
         payload = {
             "url": webhook_url,
-            "events": ["new-message", "updated-message"],
+            "events": desired_events,
         }
 
         try:
@@ -765,6 +802,24 @@ class BlueBubblesAdapter(BasePlatformAdapter):
                 return candidate.strip()
         return None
 
+    def _mark_message_seen(self, message_id: Optional[str]) -> bool:
+        """Return True if this inbound message GUID was already processed.
+
+        BlueBubbles can emit both ``new-message`` and ``updated-message`` for the
+        same GUID if a stale/manual registration includes update events. The code
+        registers only ``new-message``, but this bounded in-memory dedupe protects
+        existing bad registrations and duplicate delivery retries.
+        """
+        if not message_id:
+            return False
+        if message_id in self._recent_message_ids:
+            return True
+        self._recent_message_ids[message_id] = None
+        if len(self._recent_message_ids) > _MAX_RECENT_MESSAGE_IDS:
+            oldest = next(iter(self._recent_message_ids))
+            self._recent_message_ids.pop(oldest, None)
+        return False
+
     async def _handle_webhook(self, request):
         from aiohttp import web
 
@@ -798,7 +853,9 @@ class BlueBubblesAdapter(BasePlatformAdapter):
             return web.json_response({"error": "invalid payload"}, status=400)
 
         event_type = self._value(payload.get("type"), payload.get("event")) or ""
-        # Only process message events; silently acknowledge everything else
+        # Only process message events; silently acknowledge everything else.
+        # In particular, acknowledge but do not consume updated-message events;
+        # processing them causes duplicate auto-replies for the same message GUID.
         if event_type and event_type not in _MESSAGE_EVENTS:
             return web.Response(text="ok")
 
@@ -898,6 +955,15 @@ class BlueBubblesAdapter(BasePlatformAdapter):
         if not sender or not (chat_guid or chat_identifier) or not text:
             return web.json_response({"error": "missing message fields"}, status=400)
 
+        message_id = self._value(
+            record.get("guid"),
+            record.get("messageGuid"),
+            record.get("id"),
+        )
+        if self._mark_message_seen(message_id):
+            logger.debug("[bluebubbles] duplicate message ignored: %s", _redact(message_id))
+            return web.Response(text="ok")
+
         session_chat_id = chat_guid or chat_identifier
         is_group = bool(record.get("isGroup")) or (";+;" in (chat_guid or ""))
         source = self.build_source(
@@ -913,11 +979,7 @@ class BlueBubblesAdapter(BasePlatformAdapter):
             message_type=msg_type,
             source=source,
             raw_message=payload,
-            message_id=self._value(
-                record.get("guid"),
-                record.get("messageGuid"),
-                record.get("id"),
-            ),
+            message_id=message_id,
             reply_to_message_id=self._value(
                 record.get("threadOriginatorGuid"),
                 record.get("associatedMessageGuid"),

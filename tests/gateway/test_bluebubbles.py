@@ -1,4 +1,6 @@
 """Tests for the BlueBubbles iMessage gateway adapter."""
+from typing import Any, cast
+
 import pytest
 
 from gateway.config import Platform, PlatformConfig
@@ -121,6 +123,35 @@ class TestBlueBubblesHelpers:
     def test_init_preserves_leading_slash(self, monkeypatch):
         adapter = _make_adapter(monkeypatch, webhook_path="/my-hook")
         assert adapter.webhook_path == "/my-hook"
+
+    def test_webhook_url_preserves_numeric_loopback_host(self, monkeypatch):
+        adapter = _make_adapter(
+            monkeypatch,
+            webhook_host="127.0.0.1",
+            webhook_port=8645,
+            webhook_path="/hermes-bluebubbles-webhook",
+        )
+
+        assert adapter._webhook_url == "http://127.0.0.1:8645/hermes-bluebubbles-webhook"
+
+    def test_webhook_url_maps_unspecified_host_to_numeric_loopback(self, monkeypatch):
+        adapter = _make_adapter(monkeypatch, webhook_host="0.0.0.0")
+
+        assert adapter._webhook_url.startswith("http://127.0.0.1:")
+
+    def test_message_events_do_not_include_updated_message(self, monkeypatch):
+        from gateway.platforms.bluebubbles import _MESSAGE_EVENTS
+
+        assert "new-message" in _MESSAGE_EVENTS
+        assert "updated-message" not in _MESSAGE_EVENTS
+
+    def test_message_guid_dedupe_marks_repeated_guid(self, monkeypatch):
+        adapter = _make_adapter(monkeypatch)
+
+        assert adapter._mark_message_seen("message-guid-1") is False
+        assert adapter._mark_message_seen("message-guid-1") is True
+        assert adapter._mark_message_seen("message-guid-2") is False
+        assert adapter._mark_message_seen(None) is False
 
     def test_server_url_normalized(self, monkeypatch):
         adapter = _make_adapter(monkeypatch, server_url="http://localhost:1234/")
@@ -423,19 +454,27 @@ class TestBlueBubblesAttachmentDownload:
 
 
 class TestBlueBubblesWebhookUrl:
-    """_webhook_url property normalises local hosts to 'localhost'."""
+    """_webhook_url property preserves exact callback identity where possible."""
 
     def test_default_host(self, monkeypatch):
         adapter = _make_adapter(monkeypatch)
-        # Default webhook_host is 0.0.0.0 → normalized to localhost
-        assert "localhost" in adapter._webhook_url
+        # Default webhook_host is 0.0.0.0 → externally reachable loopback URL.
+        assert adapter._webhook_url.startswith("http://127.0.0.1:")
         assert str(adapter.webhook_port) in adapter._webhook_url
         assert adapter.webhook_path in adapter._webhook_url
 
-    @pytest.mark.parametrize("host", ["0.0.0.0", "127.0.0.1", "localhost", "::"])
-    def test_local_hosts_normalized(self, monkeypatch, host):
+    @pytest.mark.parametrize(
+        ("host", "expected"),
+        [
+            ("0.0.0.0", "127.0.0.1"),
+            ("::", "127.0.0.1"),
+            ("127.0.0.1", "127.0.0.1"),
+            ("localhost", "localhost"),
+        ],
+    )
+    def test_local_hosts_preserve_or_map_to_stable_loopback(self, monkeypatch, host, expected):
         adapter = _make_adapter(monkeypatch, webhook_host=host)
-        assert adapter._webhook_url.startswith("http://localhost:")
+        assert adapter._webhook_url.startswith(f"http://{expected}:")
 
     def test_custom_host_preserved(self, monkeypatch):
         adapter = _make_adapter(monkeypatch, webhook_host="192.168.1.50")
@@ -561,6 +600,28 @@ class TestBlueBubblesWebhookRegistration:
         )
         assert ok is True
 
+    def test_register_fresh_uses_new_message_only(self, monkeypatch):
+        """Webhook registration must not subscribe to updated-message events."""
+        import asyncio
+        adapter = _make_adapter(monkeypatch)
+        adapter.client = self._mock_client(get_response={"status": 200, "data": []})
+        posted_payload = None
+
+        async def tracking_post(path, payload):
+            nonlocal posted_payload
+            posted_payload = payload
+            return {"status": 200, "data": {"id": 42}}
+
+        adapter._api_post = tracking_post
+
+        ok = asyncio.get_event_loop().run_until_complete(
+            adapter._register_webhook()
+        )
+
+        assert ok is True
+        assert posted_payload is not None
+        assert posted_payload["events"] == ["new-message"]
+
     def test_register_accepts_201(self, monkeypatch):
         """BB might return 201 Created — must still succeed."""
         import asyncio
@@ -599,6 +660,95 @@ class TestBlueBubblesWebhookRegistration:
         )
         assert ok is True
         assert not post_called, "Should reuse existing, not POST again"
+
+    def test_register_replaces_existing_updated_message_subscription(self, monkeypatch):
+        """Stale registrations with updated-message are removed and recreated."""
+        import asyncio
+        adapter = _make_adapter(monkeypatch)
+        url = adapter._webhook_register_url
+        deleted_urls = []
+        posted_payload = None
+
+        class Client:
+            async def get(self, *args, **kwargs):
+                class R:
+                    status_code = 200
+                    def raise_for_status(self):
+                        pass
+                    def json(self):
+                        return {"status": 200, "data": [
+                            {"id": 8, "url": url, "events": ["new-message", "updated-message"]},
+                        ]}
+                return R()
+
+            async def delete(self, *args, **kwargs):
+                deleted_urls.append(args[0] if args else "")
+                class R:
+                    status_code = 200
+                    def raise_for_status(self):
+                        pass
+                return R()
+
+        adapter.client = cast(Any, Client())
+
+        async def tracking_post(path, payload):
+            nonlocal posted_payload
+            posted_payload = payload
+            return {"status": 200, "data": {"id": 9}}
+        adapter._api_post = tracking_post
+
+        ok = asyncio.get_event_loop().run_until_complete(
+            adapter._register_webhook()
+        )
+        assert ok is True
+        assert any("/api/v1/webhook/8" in url for url in deleted_urls)
+        assert posted_payload is not None
+        assert posted_payload["events"] == ["new-message"]
+
+    def test_register_removes_stale_duplicate_but_reuses_clean_existing(self, monkeypatch):
+        """If both clean and stale duplicates exist, delete stale without adding another clean one."""
+        import asyncio
+        adapter = _make_adapter(monkeypatch)
+        url = adapter._webhook_register_url
+        deleted_urls = []
+        post_called = False
+
+        class Client:
+            async def get(self, *args, **kwargs):
+                class R:
+                    status_code = 200
+                    def raise_for_status(self):
+                        pass
+                    def json(self):
+                        return {"status": 200, "data": [
+                            {"id": 8, "url": url, "events": ["new-message", "updated-message"]},
+                            {"id": 9, "url": url, "events": ["new-message"]},
+                        ]}
+                return R()
+
+            async def delete(self, *args, **kwargs):
+                deleted_urls.append(args[0] if args else "")
+                class R:
+                    status_code = 200
+                    def raise_for_status(self):
+                        pass
+                return R()
+
+        adapter.client = cast(Any, Client())
+
+        async def tracking_post(path, payload):
+            nonlocal post_called
+            post_called = True
+            return {"status": 200, "data": {"id": 10}}
+        adapter._api_post = tracking_post
+
+        ok = asyncio.get_event_loop().run_until_complete(
+            adapter._register_webhook()
+        )
+        assert ok is True
+        assert any("/api/v1/webhook/8" in url for url in deleted_urls)
+        assert not any("/api/v1/webhook/9" in url for url in deleted_urls)
+        assert not post_called
 
     def test_register_returns_false_without_client(self, monkeypatch):
         import asyncio
