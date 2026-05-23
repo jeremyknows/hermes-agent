@@ -184,13 +184,98 @@ def _freshness_label(st_mtime: float) -> str:
     return dt.isoformat().replace("+00:00", "Z")
 
 
+def _human_title(path: Path, desc: Dict[str, Any]) -> str:
+    raw = str(desc.get("title") or "").strip()
+    if raw:
+        return raw
+    stem = path.stem.replace("_", " ").replace("-", " ").strip()
+    return stem.title() or "Wiki note"
+
+
+def _confidence_label(*, degraded: bool, degraded_reason: Optional[str]) -> str:
+    if not degraded:
+        return "high"
+    if degraded_reason == "allowlisted wiki source is missing":
+        return "medium"
+    return "low"
+
+
+def _why_included(include_id: str, subject: str, desc: Dict[str, Any]) -> str:
+    raw = str(desc.get("why_included") or "").strip()
+    if raw:
+        return raw
+    return f"Allowlisted wiki include '{include_id}' matched subject '{subject}' exactly"
+
+
+def _open_hint(include_id: str, subject: str, desc: Dict[str, Any]) -> Optional[str]:
+    raw = str(desc.get("open_hint") or "").strip()
+    if raw:
+        return raw
+    return f'wiki_include_read(include_id="{include_id}", subject="{subject}")'
+
+
+def build_source_card(
+    *,
+    include_id: str,
+    subject: str,
+    desc: Dict[str, Any],
+    display_path: str,
+    freshness: str,
+    privacy: str,
+    degraded: bool,
+    degraded_reason: Optional[str],
+    path: Path,
+) -> Dict[str, Any]:
+    card: Dict[str, Any] = {
+        "family": "wiki",
+        "title": _human_title(path, desc),
+        "display_path": display_path,
+        "locator": f"wiki-include:{include_id}",
+        "freshness": freshness,
+        "privacy": privacy,
+        "confidence": _confidence_label(degraded=degraded, degraded_reason=degraded_reason),
+        "degraded": degraded,
+        "why_included": _why_included(include_id, subject, desc),
+    }
+    open_hint = _open_hint(include_id, subject, desc)
+    if open_hint:
+        card["open_hint"] = open_hint
+    return card
+
+
+def format_source_card_compact(card: Dict[str, Any]) -> str:
+    status = "degraded" if card.get("degraded") else "ok"
+    return (
+        f"[{card.get('family', 'source')}] {card.get('title', 'Untitled')}"
+        f" · {card.get('display_path', '?')}"
+        f" · {card.get('privacy', 'unknown')}"
+        f" · {card.get('freshness', 'unknown')}"
+        f" · confidence={card.get('confidence', 'unknown')}"
+        f" · {status}"
+    )
+
+
 def _degraded_filesystem_result(
     include_id: str,
     subject: str,
+    desc: Dict[str, Any],
+    path: Path,
     display_path: str,
     source_label: str,
     privacy_label: str,
 ) -> Dict[str, Any]:
+    degraded_reason = "allowlisted wiki source is unreadable"
+    source_card = build_source_card(
+        include_id=include_id,
+        subject=subject,
+        desc=desc,
+        display_path=display_path,
+        freshness="unavailable",
+        privacy=privacy_label,
+        degraded=True,
+        degraded_reason=degraded_reason,
+        path=path,
+    )
     return {
         "success": False,
         "include_id": include_id,
@@ -199,9 +284,11 @@ def _degraded_filesystem_result(
         "privacy": privacy_label,
         "freshness": "unavailable",
         "degraded": True,
-        "degraded_reason": "allowlisted wiki source is unreadable",
+        "degraded_reason": degraded_reason,
         "path": display_path,
-        "error": "allowlisted wiki source is unreadable",
+        "source_card": source_card,
+        "source_card_compact": format_source_card_compact(source_card),
+        "error": degraded_reason,
     }
 
 
@@ -237,9 +324,21 @@ def read_wiki_include(include_id: str, subject: str, *, config: Optional[Dict[st
     try:
         exists = path.exists()
     except OSError:
-        return _degraded_filesystem_result(include_id, subject, display_path, source_label, privacy_label)
+        return _degraded_filesystem_result(include_id, subject, desc, path, display_path, source_label, privacy_label)
 
     if not exists:
+        degraded_reason = "allowlisted wiki source is missing"
+        source_card = build_source_card(
+            include_id=include_id,
+            subject=subject,
+            desc=desc,
+            display_path=display_path,
+            freshness="unavailable",
+            privacy=privacy_label,
+            degraded=True,
+            degraded_reason=degraded_reason,
+            path=path,
+        )
         return {
             "success": False,
             "include_id": include_id,
@@ -248,14 +347,16 @@ def read_wiki_include(include_id: str, subject: str, *, config: Optional[Dict[st
             "privacy": privacy_label,
             "freshness": "unavailable",
             "degraded": True,
-            "degraded_reason": "allowlisted wiki source is missing",
+            "degraded_reason": degraded_reason,
             "path": display_path,
+            "source_card": source_card,
+            "source_card_compact": format_source_card_compact(source_card),
             "error": "allowlisted wiki source is missing",
         }
     try:
         is_file = path.is_file()
     except OSError:
-        return _degraded_filesystem_result(include_id, subject, display_path, source_label, privacy_label)
+        return _degraded_filesystem_result(include_id, subject, desc, path, display_path, source_label, privacy_label)
 
     if not is_file:
         raise WikiIncludeError("wiki include rejected: descriptor path is not a file")
@@ -263,7 +364,7 @@ def read_wiki_include(include_id: str, subject: str, *, config: Optional[Dict[st
     try:
         size = path.stat().st_size
     except OSError:
-        return _degraded_filesystem_result(include_id, subject, display_path, source_label, privacy_label)
+        return _degraded_filesystem_result(include_id, subject, desc, path, display_path, source_label, privacy_label)
 
     if size > int(cfg.get("max_bytes") or _MAX_WIKI_INCLUDE_BYTES):
         raise WikiIncludeError("wiki include rejected: file exceeds wiki include size limit")
@@ -272,20 +373,35 @@ def read_wiki_include(include_id: str, subject: str, *, config: Optional[Dict[st
         text = path.read_text(encoding="utf-8", errors="replace")
         st = path.stat()
     except OSError:
-        return _degraded_filesystem_result(include_id, subject, display_path, source_label, privacy_label)
+        return _degraded_filesystem_result(include_id, subject, desc, path, display_path, source_label, privacy_label)
 
     redacted = _redact_content(text)
     degraded = not bool(source_label)
+    degraded_reason = "descriptor missing source label" if degraded else None
+    freshness = _freshness_label(st.st_mtime)
+    source_card = build_source_card(
+        include_id=include_id,
+        subject=subject,
+        desc=desc,
+        display_path=display_path,
+        freshness=freshness,
+        privacy=privacy_label,
+        degraded=degraded,
+        degraded_reason=degraded_reason,
+        path=path,
+    )
     return {
         "success": True,
         "include_id": include_id,
         "subject": subject,
         "source": source_label or "wiki:no_source_label",
         "privacy": privacy_label,
-        "freshness": _freshness_label(st.st_mtime),
+        "freshness": freshness,
         "degraded": degraded,
-        "degraded_reason": "descriptor missing source label" if degraded else None,
+        "degraded_reason": degraded_reason,
         "path": display_path,
+        "source_card": source_card,
+        "source_card_compact": format_source_card_compact(source_card),
         "bytes": size,
         "content": redacted,
     }
