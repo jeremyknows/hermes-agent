@@ -1200,6 +1200,18 @@ DEFAULT_CONFIG = {
         "provider": "",
     },
 
+    # Memory Seam read-only include families. Default-off; the first slice is a
+    # least-sensitive Atlas wiki family that reads only explicit sanitized file
+    # descriptors when memory_seam.wiki.enabled is true and the toolset is enabled.
+    "memory_seam": {
+        "wiki": {
+            "enabled": False,
+            "allowed_roots": [],
+            "max_bytes": 131072,
+            "allowlist": [],
+        },
+    },
+
     # Subagent delegation — override the provider:model used by delegate_task
     # so child agents can run on a different (cheaper/faster) provider and model.
     # Uses the same runtime provider resolution as CLI/gateway startup, so all
@@ -3300,7 +3312,7 @@ _KNOWN_ROOT_KEYS = {
     "_config_version", "model", "providers", "fallback_model",
     "fallback_providers", "credential_pool_strategies", "toolsets",
     "agent", "terminal", "display", "compression", "delegation",
-    "auxiliary", "custom_providers", "context", "memory", "gateway",
+    "auxiliary", "custom_providers", "context", "memory", "memory_seam", "gateway",
     "sessions",
 }
 
