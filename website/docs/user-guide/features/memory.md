@@ -135,9 +135,36 @@ memory_seam:
         path: ~/atlas/shared/wiki/sanitized/atlas-overview.md
         source: atlas-wiki
         privacy: least_sensitive
+        title: Atlas Overview
+        why_included: Public Atlas orientation note approved for Memory Seam reads.
+        open_hint: wiki_include_read(include_id="atlas-public-overview", subject="atlas-overview")
 ```
 
-The `wiki_include_read` tool rejects requests before any filesystem read when the `include_id` is not allowlisted, the caller-provided `subject` does not match the descriptor, the path leaves the configured wiki root, or any path component looks private/protected/secret-bearing. Responses preserve `source`, `privacy`, `freshness`, and `degraded` labels and redact obvious secrets/emails from returned content. Missing files and missing source labels are reported as degraded rather than silently promoted to trusted context.
+Example response shape:
+
+```json
+{
+  "success": true,
+  "source": "atlas-wiki",
+  "freshness": "2026-05-23T12:00:00Z",
+  "degraded": false,
+  "source_card": {
+    "family": "wiki",
+    "title": "Atlas Overview",
+    "display_path": "wiki:atlas-overview.md",
+    "locator": "wiki-include:atlas-public-overview",
+    "freshness": "2026-05-23T12:00:00Z",
+    "privacy": "least_sensitive",
+    "confidence": "high",
+    "degraded": false,
+    "why_included": "Public Atlas orientation note approved for Memory Seam reads.",
+    "open_hint": "wiki_include_read(include_id=\"atlas-public-overview\", subject=\"atlas-overview\")"
+  },
+  "source_card_compact": "[wiki] Atlas Overview · wiki:atlas-overview.md · least_sensitive · 2026-05-23T12:00:00Z · confidence=high · ok"
+}
+```
+
+The `wiki_include_read` tool rejects requests before any filesystem read when the `include_id` is not allowlisted, the caller-provided `subject` does not match the descriptor, the path leaves the configured wiki root, or any path component looks private/protected/secret-bearing. Responses preserve `source`, `privacy`, `freshness`, and `degraded` labels, attach a compact source card for safe provenance, and redact obvious secrets/emails from returned content. Missing files and missing source labels are reported as degraded rather than silently promoted to trusted context.
 
 ## Capacity Management
 
