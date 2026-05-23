@@ -112,6 +112,33 @@ The agent saves automatically — you don't need to ask. It saves when it learns
 - **Session-specific ephemera:** Temporary file paths, one-off debugging context
 - **Information already in context files:** SOUL.md and AGENTS.md content
 
+## Memory Seam wiki includes
+
+Hermes also has a default-off, read-only Memory Seam include family for least-sensitive Atlas wiki notes. It is not active unless you explicitly enable the `memory-seam-wiki` toolset and add exact descriptors to `memory_seam.wiki.allowlist`.
+
+Example:
+
+```yaml
+toolsets:
+  - hermes-cli
+  - memory-seam-wiki
+
+memory_seam:
+  wiki:
+    enabled: true
+    allowed_roots:
+      - ~/atlas/shared/wiki
+    allowlist:
+      - id: atlas-public-overview
+        family: wiki
+        subject: atlas-overview
+        path: ~/atlas/shared/wiki/sanitized/atlas-overview.md
+        source: atlas-wiki
+        privacy: least_sensitive
+```
+
+The `wiki_include_read` tool rejects requests before any filesystem read when the `include_id` is not allowlisted, the caller-provided `subject` does not match the descriptor, the path leaves the configured wiki root, or any path component looks private/protected/secret-bearing. Responses preserve `source`, `privacy`, `freshness`, and `degraded` labels and redact obvious secrets/emails from returned content. Missing files and missing source labels are reported as degraded rather than silently promoted to trusted context.
+
 ## Capacity Management
 
 Memory has strict character limits to keep system prompts bounded:
