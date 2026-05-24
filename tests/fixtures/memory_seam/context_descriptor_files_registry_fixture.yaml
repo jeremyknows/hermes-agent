@@ -1,0 +1,19 @@
+family_id: context_descriptor_files
+owner: descriptor_source_owner
+allowed_scopes: [context]
+allowed_includes: [user, memory, soul, project, last_session]
+private_class: agent_private_or_atlas_private_per_descriptor
+redaction_profile: standard_plus_context_sensitive_vocabulary_line_redaction
+allowed_posture: sax_supervised_exact_descriptor_pull_only_after_review
+fallback_labels:
+  - context_unavailable
+  - source_not_registered
+  - protected_path_denied
+  - source_too_large
+  - stale_context_source
+  - unauthorized_narrowing
+public_artifact_policy: descriptor_inventory_may_be_reportable_without_absolute_roots_snippets_require_hygiene_scan
+rollback_semantics:
+  disable_label: source_not_registered
+  cache_namespace: context_descriptor_files
+  on_disable: clear_descriptor_cache_no_path_substitution
