@@ -1,0 +1,19 @@
+family_id: wiki_gbrain
+owner: librarian
+allowed_scopes: [wiki]
+private_class: atlas_private
+redaction_profile: standard_reportable_redaction
+allowed_posture: sax_supervised_pull_only_after_review
+fallback_labels:
+  - gbrain_missing
+  - gbrain_timeout
+  - gbrain_error
+  - stale_index
+  - partial_corpus
+  - client_side_filter
+  - source_filter_client_side
+public_artifact_policy: sanitized_metadata_and_bounded_snippets_only_unless_separately_published
+rollback_semantics:
+  disable_label: source_family_disabled
+  cache_namespace: wiki_gbrain
+  on_disable: clear_family_cache_and_deny_grants

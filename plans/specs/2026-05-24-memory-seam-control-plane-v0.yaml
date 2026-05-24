@@ -1,0 +1,862 @@
+# Memory Seam control-plane v0 draft
+# Status: Sax-local review artifact / not runtime config / not activation authority
+# Source anchor checked: system-pipes main 63943e95744e94c0457e9a29dcae608a81d7e2fc (PR #38)
+# Last live re-check: 2026-05-24T13:05:13Z
+# Gate posture: Gate 3 remains contract_authoritative / implementation_held
+#
+# Mental model:
+# - Memory Seam is the independence adapter between agent runtimes and memory backends.
+# - Librarian / Memory City is the custody, curation, front-desk, and write-authority layer.
+# - Source registry is the catalog of allowed shelves.
+# - Grant matrix is the keyring rulebook for which agent gets which keys.
+#
+# This file is intentionally outside runtime load paths. It is a compact control-plane
+# sketch for review before any implementation wiring.
+version: memory_seam_control_plane_v0_draft
+status: sax_local_review_artifact_not_activation_authority
+source_anchor:
+  repo: git@github.com:jeremyknows/system-pipes.git
+  main_sha: "63943e95744e94c0457e9a29dcae608a81d7e2fc"
+  checked_evidence:
+    - docs/atlas-os/memory-seam-gate3-closure-checklist.md
+    - scripts/atlas-query/README.md
+    - scripts/atlas-query/backends/memory_seam.py
+    - scripts/atlas-query/backends/memory_seam_descriptors.py
+  latest_refresh:
+    checked_at: "2026-05-24T13:05:13Z"
+    clean_temp_clone_head: "63943e95744e94c0457e9a29dcae608a81d7e2fc"
+    ls_remote_main: "63943e95744e94c0457e9a29dcae608a81d7e2fc"
+    gate3_posture_confirmed: contract_authoritative_implementation_held
+    implementation_gate: hold_code_until_control_plane_review_or_explicit_operator_go
+    validation: "YAML structural validation passed: source_families=7 grant_subjects=7 fixture_cases=5 hygiene_families=6 kill_switches=5 acceptance_cases=9 gate3_traceability=10 review_required_fields=7 eval_harness_fields=8 eval_harness_green_bar=5 eval_fixture_corpus=6 eval_fixture_checks=5 review_readiness_checkpoints=8 receipt_required_fields=16 receipt_examples=2 operator_review_ballot_options=7"
+    source_check_method: clean_temp_clone_plus_ls_remote_because_local_system_pipes_worktree_is_dirty
+hard_holds:
+  - no_gate_status_promotion
+  - no_persistent_service_or_listener
+  - no_network_exposure_without_hmac_or_scoped_vault
+  - no_unsupervised_or_cron_reads_without_hmac_or_scoped_vault
+  - no_multi_user_or_multi_machine_runtime_without_acting_for_model
+  - no_global_mcp_or_client_config_mutation
+  - no_runtime_registry_runtime_consumption
+  - no_writes_custody_reindex_thread_retirement_or_publish_authority
+  - no_provider_live_canary_or_prod_traffic
+  - no_raw_sessions_or_credential_material_in_public_artifacts
+
+gate3_traceability:
+  source_registry_v0:
+    coverage: drafted_in_source_families
+    proof_needed: human_review_registry_home_versioning_and_held_row_policy
+    status: drafted_not_reviewed
+  per_agent_grant_matrix:
+    coverage: drafted_in_grant_matrix
+    proof_needed: evaluator_only_deny_before_backend_touch_and_mode_gate_tests
+    status: drafted_not_enforced
+  token_subject_acting_for:
+    coverage: evaluator_invariants_and_hard_holds
+    proof_needed: verifier_derived_subject_and_negative_tests_before_nonlocal_or_unsupervised_use
+    status: held
+  hmac_or_scoped_vault:
+    coverage: hard_hold
+    proof_needed: dedicated_verifier_slice_before_cron_network_multi_user_or_multi_machine
+    status: held
+  useful_content_eval:
+    coverage: useful_content_eval
+    proof_needed: fixture_harness_safe_facts_survive_vs_disabled_baseline
+    status: drafted_unrun
+  public_reportable_hygiene:
+    coverage: public_hygiene_scan
+    proof_needed: scanner_over_fixture_sample_outputs_and_closure_artifacts
+    status: drafted_unrun
+  endpoint_health_latency:
+    coverage: upstream_no_live_evidence_plus_local_kill_switch_metrics_placeholders
+    proof_needed: focused_no_live_tests_and_latency_token_envelope_when_implementation_exists
+    status: not_advanced_locally
+  kill_switch_rollback:
+    coverage: kill_switches
+    proof_needed: tests_for_global_family_grant_descriptor_public_lock_and_cache_flush
+    status: drafted_unproven
+  audit_receipts:
+    coverage: audit_receipts
+    proof_needed: metadata_only_receipts_with_no_raw_content_private_ids_or_paths
+    status: drafted_unproven
+  final_closure_review:
+    coverage: review_packet_scaffold
+    proof_needed: reconcile_reviewed_docs_tests_receipts_residual_holds_and_operator_decision
+    status: not_started
+
+defaults:
+  enabled: false
+  posture: local_read_only_default_off_supervised
+  deny_by_default: true
+  reportable_output_default: metadata_only
+  cache_key_requirements:
+    - registry_version
+    - grant_version
+    - source_family
+    - subject
+    - include_or_scope
+  standard_redactions:
+    - token_shaped_values
+    - credential_refs
+    - raw_platform_ids_for_cross_agent_or_reportable_output
+    - private_absolute_paths_for_reportable_output
+    - transcript_like_lines_for_reportable_output
+
+source_families:
+  wiki_gbrain:
+    owner: librarian
+    backend: gbrain_via_atlas_query_wiki
+    allowed_scopes: [wiki]
+    allowed_includes: []
+    private_class: atlas_private
+    canonicality: curated_wiki_when_active
+    freshness_rule:
+      dogfood_stale_after_seconds: 604800
+      loop3_reference_seconds: 2592000
+      surface_staleness_warning: true
+    redaction_profile: standard_reportable_redaction
+    fallback_labels: [gbrain_missing, gbrain_timeout, gbrain_error, stale_index, partial_corpus, client_side_filter, source_filter_client_side]
+    public_artifact_policy: sanitized_metadata_and_bounded_snippets_only_unless_separately_published
+    rollback_semantics:
+      disable_label: source_family_disabled
+      cache_namespace: wiki_gbrain
+      on_disable: clear_family_cache_and_deny_grants
+    allowed_posture: sax_supervised_pull_only_after_review
+
+  diary_gbrain:
+    owner: agent_diary_owner_with_librarian_curation
+    backend: gbrain_via_atlas_query_memory
+    allowed_scopes: [diary]
+    allowed_includes: []
+    private_class: agent_private
+    canonicality: agent_diary_operational_memory_not_public_artifact
+    freshness_rule:
+      dogfood_stale_after_seconds: 86400
+      low_risk_recall_stale_after_seconds: 604800
+      surface_staleness_warning: true
+    redaction_profile: standard_plus_cross_agent_diary_redaction
+    fallback_labels: [gbrain_missing, gbrain_timeout, gbrain_error, stale_index, partial_corpus, client_side_filter, source_filter_client_side]
+    public_artifact_policy: no_public_raw_snippets_unless_librarian_curates_into_wiki
+    rollback_semantics:
+      disable_label: source_family_disabled
+      cache_namespace: diary_gbrain
+      on_disable: clear_family_cache_revoke_subject_diary_grants
+    allowed_posture: sax_self_supervised_pull_only_after_review
+
+  context_descriptor_files:
+    owner: descriptor_source_owner
+    backend: exact_filesystem_descriptors
+    allowed_scopes: [context]
+    allowed_includes: [user, memory, soul, project, last_session]
+    private_class: agent_private_or_atlas_private_per_descriptor
+    canonicality: runtime_context_or_project_context_per_descriptor
+    freshness_rule:
+      default_stale_after_seconds: 604800
+      source: descriptor_freshness_ts_or_filesystem_mtime
+      surface_freshness_label: true
+    redaction_profile: standard_plus_context_sensitive_vocabulary_line_redaction
+    fallback_labels: [context_unavailable, source_not_registered, protected_path_denied, source_too_large, stale_context_source, unauthorized_narrowing]
+    public_artifact_policy: descriptor_inventory_may_be_reportable_without_absolute_roots_snippets_require_hygiene_scan
+    rollback_semantics:
+      disable_label: source_not_registered
+      cache_namespace: context_descriptor_files
+      on_disable: clear_descriptor_cache_no_path_substitution
+    allowed_posture: sax_supervised_exact_descriptor_pull_only_after_review
+
+  hermes_session_search:
+    owner: hermes_runtime_user
+    backend: hermes_sqlite_fts5_session_db
+    allowed_scopes: [session]
+    allowed_includes: []
+    private_class: raw_transcript_private
+    canonicality: raw_session_transcript_history
+    freshness_rule:
+      source: session_db_timestamps
+      required_before_use: add_age_labels_per_session_or_message
+    redaction_profile: transcript_safe_redaction_required_before_reportable_output
+    fallback_labels: [session_db_unavailable, source_family_disabled]
+    public_artifact_policy: metadata_only_no_public_transcript_snippets
+    rollback_semantics:
+      disable_label: source_family_disabled
+      cache_namespace: hermes_session_search
+      on_disable: clear_session_window_cache_and_deny_all_session_grants
+    allowed_posture: held_not_initial_dogfood
+
+  bus_operational_metadata:
+    owner: system_pipes
+    backend: bus_jsonl_and_sqlite_mirror
+    allowed_scopes: [ops]
+    allowed_includes: []
+    private_class: ops_private
+    canonicality: authoritative_operational_event_metadata
+    freshness_rule:
+      recent_window_seconds: 600
+      broader_summary_max_seconds: 86400
+      surface_stale_mirror: true
+    redaction_profile: ops_metadata_redaction_no_raw_ids_or_private_paths
+    fallback_labels: [bus_sqlite_missing, bus_jsonl_missing, stale_mirror, partial_archive]
+    public_artifact_policy: metadata_only_no_raw_payloads_or_platform_ids
+    rollback_semantics:
+      disable_label: source_family_disabled
+      cache_namespace: bus_operational_metadata
+      on_disable: clear_bus_query_cache_and_deny_ops_grants
+    allowed_posture: held_for_registry_review
+
+  qmd_regression:
+    owner: system_pipes_memory_benchmark
+    backend: qmd_index_and_benchmark_outputs
+    allowed_scopes: []
+    allowed_includes: []
+    private_class: atlas_private
+    canonicality: regression_evidence_not_primary_recall
+    freshness_rule:
+      source: benchmark_timestamp_only
+    redaction_profile: inherits_source_under_test
+    fallback_labels: [qmd_fallback_not_primary, qmd_missing, qmd_stale]
+    public_artifact_policy: benchmark_summary_only
+    rollback_semantics:
+      disable_label: omitted_from_runtime_registry
+      cache_namespace: none
+      on_disable: keep_out_of_runtime
+    allowed_posture: eval_only
+
+  librarian_custody_outputs:
+    owner: librarian
+    backend: curated_wiki_outputs_only
+    allowed_scopes: [wiki]
+    allowed_includes: []
+    private_class: atlas_private_until_published
+    canonicality: canonical_after_librarian_acceptance
+    freshness_rule:
+      inherits: wiki_gbrain
+    redaction_profile: inherits_curated_source_policy
+    fallback_labels: [write_like_unavailable, write_like_forbidden]
+    public_artifact_policy: public_only_by_librarian_publish_policy
+    rollback_semantics:
+      disable_label: no_seam_write_grants_exist
+      cache_namespace: wiki_gbrain
+      on_disable: no_write_revoke_needed_because_seam_has_no_writes
+    allowed_posture: read_only_via_wiki_after_review
+
+grant_matrix:
+  sax:
+    wiki_gbrain:
+      decision: allow_after_review
+      modes: [supervised, pull_only]
+      denied_modes: [startup, turn, cron, runtime, write_request]
+    diary_gbrain:
+      decision: allow_own_diary_after_descriptor_and_grant_review
+      modes: [supervised, pull_only]
+      constraints: [subject_must_equal_sax, no_all_agent_widening]
+      denied_modes: [startup, turn, cron, runtime, write_request]
+    context_descriptor_files:
+      decision: allow_after_review
+      modes: [supervised, pull_only]
+      includes: [soul, memory, project, last_session]
+      constraints: [exact_descriptors_only, no_profile_crawling]
+      denied_modes: [startup, turn, cron, runtime, write_request]
+    hermes_session_search:
+      decision: hold
+      modes: []
+      future_candidate: supervised_metadata_first_only
+    bus_operational_metadata:
+      decision: hold
+      modes: []
+    qmd_regression:
+      decision: eval_only
+      modes: [supervised]
+    write_request:
+      decision: deny
+      modes: []
+
+  watson:
+    all_source_families:
+      decision: hold_broad_adoption
+      note: existing_non_seam_tools_unchanged
+      modes: []
+    write_request:
+      decision: deny_via_seam
+
+  librarian:
+    all_source_families:
+      decision: hold_broad_adoption_through_seam
+      note: custody_authority_remains_outside_memory_seam
+      modes: []
+    qmd_regression:
+      decision: eval_only
+      modes: [supervised]
+    write_request:
+      decision: deny_via_seam_librarian_writes_only_through_reviewed_custody_tools
+
+  terminal:
+    all_source_families:
+      decision: hold
+      modes: []
+    qmd_regression:
+      decision: eval_only
+      modes: [supervised]
+    write_request:
+      decision: deny
+
+  builder_and_workers:
+    all_source_families:
+      decision: deny_until_reviewed
+      modes: []
+    write_request:
+      decision: deny
+
+  cron_unsupervised:
+    all_source_families:
+      decision: deny_until_hmac_or_scoped_vault_and_negative_tests
+      modes: []
+    qmd_regression:
+      decision: fixture_local_eval_only
+      modes: []
+    write_request:
+      decision: deny
+
+  network_multi_user_multi_machine:
+    all_source_families:
+      decision: deny_until_hmac_scoped_vault_and_acting_for_model
+      modes: []
+    write_request:
+      decision: deny
+
+evaluator_contract:
+  input_tuple: [subject, source_family, scope_or_include, mode, posture, grant_version]
+  output_allow_fields: [decision, max_bytes, redaction_profile, cache_namespace, audit_receipt_metadata]
+  output_deny_fields: [decision, degraded_label, reason, audit_receipt_metadata]
+  enforcement_invariants:
+    - deny_before_backend_touch
+    - token_subject_can_only_be_narrowed_by_request_shape
+    - disabled_source_family_precedes_stale_grant
+    - exact_descriptor_match_no_fallback_discovery
+    - mode_gates_distinguish_supervised_pull_only_from_startup_turn_cron_runtime
+    - redaction_and_truncation_labels_are_machine_visible
+    - audit_receipts_metadata_only
+    - cache_keys_include_registry_version_and_grant_version
+    - seam_has_no_librarian_write_custody_authority
+    - reportable_output_requires_separate_hygiene_policy
+  required_deny_examples:
+    - subject: sax
+      source_family: diary_gbrain
+      scope_or_include: diary
+      mode: cron
+      degraded_label: grant_mode_denied
+    - subject: builder
+      source_family: wiki_gbrain
+      scope_or_include: wiki
+      mode: supervised
+      degraded_label: grant_missing
+    - subject: sax
+      source_family: context_descriptor_files
+      scope_or_include: unknown_include
+      mode: supervised
+      degraded_label: source_not_registered
+    - subject: network_multi_user_multi_machine
+      source_family: wiki_gbrain
+      scope_or_include: wiki
+      mode: runtime
+      degraded_label: verifier_required
+  evaluator_only_acceptance_cases:
+    sax_wiki_supervised_allow:
+      input:
+        subject: sax
+        source_family: wiki_gbrain
+        scope_or_include: wiki
+        mode: supervised
+        posture: local_read_only_default_off_supervised
+      expected: allow_metadata_only_bounded_bytes_standard_redaction_wiki_cache_namespace
+      proves: reviewed_sax_pull_path_without_backend_calls
+    sax_context_project_pull_allow:
+      input:
+        subject: sax
+        source_family: context_descriptor_files
+        scope_or_include: project
+        mode: pull_only
+      expected: allow_metadata_only_exact_descriptor_required_no_path_discovery
+      proves: context_access_is_descriptor_key_based
+    sax_diary_cron_deny:
+      input:
+        subject: sax
+        source_family: diary_gbrain
+        scope_or_include: diary
+        mode: cron
+      expected_degraded_label: grant_mode_denied
+      proves: supervised_pull_only_does_not_widen_to_cron
+    builder_wiki_supervised_deny:
+      input:
+        subject: builder
+        source_family: wiki_gbrain
+        scope_or_include: wiki
+        mode: supervised
+      expected_degraded_label: grant_missing
+      proves: worker_adoption_stays_denied_until_review
+    sax_unknown_context_include_deny:
+      input:
+        subject: sax
+        source_family: context_descriptor_files
+        scope_or_include: unknown_include
+        mode: supervised
+      expected_degraded_label: source_not_registered
+      proves: include_allowlist_is_closed
+    network_runtime_verifier_deny:
+      input:
+        subject: network_multi_user_multi_machine
+        source_family: wiki_gbrain
+        scope_or_include: wiki
+        mode: runtime
+      expected_degraded_label: verifier_required
+      proves: hmac_or_scoped_vault_requirement_is_hard_gate
+    source_family_kill_switch_deny:
+      setup: wiki_gbrain_enabled_false_with_valid_sax_grant
+      expected_degraded_label: source_family_disabled
+      cache_action: clear_wiki_gbrain_family_cache_namespace
+      proves: source_family_disable_beats_stale_grants
+    grant_revocation_deny:
+      setup: sax_context_grant_revoked_or_grant_version_incremented
+      expected_degraded_label: grant_revoked
+      cache_action: clear_subject_family_descriptor_cache_keys
+      proves: revocation_invalidates_cached_authority
+    public_artifact_lock_deny:
+      setup: reportable_snippet_requested_while_public_artifact_lock_active
+      expected_degraded_label: public_artifact_locked
+      expected_output: metadata_receipt_only
+      proves: local_safe_read_is_not_automatically_public_safe
+
+useful_content_eval:
+  goal: prove_safe_useful_content_survives_redaction_and_truncation_vs_disabled_baseline
+  fixture_families: [wiki_gbrain, diary_gbrain, context_descriptor_files, project_context, hermes_session_like]
+  baselines: [disabled_no_seam, leak_prevention_only, useful_safe_target]
+  fixture_cases:
+    wiki_curated_project_fact:
+      source_family: wiki_gbrain
+      useful_fact: project_owner_gate_posture_and_next_action
+      embedded_hazards: [token_shaped_value, private_absolute_path, stale_marker]
+      required_safe_output: bounded_snippet_with_source_label_useful_fact_redaction_labels_and_staleness_warning_when_aged
+      disabled_comparison: disabled_baseline_cannot_answer_owner_posture_next_action
+      dogfood_gate: allowed_family_must_pass
+    diary_self_operational_fact:
+      source_family: diary_gbrain
+      useful_fact: sax_local_assumption_or_handoff_note
+      embedded_hazards: [cross_agent_diary_phrase, raw_platform_style_id, credential_ref]
+      required_safe_output: self_supervised_fact_survives_reportable_mode_removes_id_and_ref
+      disabled_comparison: disabled_baseline_loses_handoff_fact
+      dogfood_gate: optional_until_diary_review
+    context_descriptor_project_note:
+      source_family: context_descriptor_files
+      useful_fact: exact_descriptor_title_root_ref_relative_path_project_fact
+      embedded_hazards: [protected_path_decoy, private_path_text, oversized_tail]
+      required_safe_output: descriptor_metadata_without_absolute_root_front_loaded_fact_survives_byte_cap_no_path_substitution
+      disabled_comparison: disabled_baseline_lacks_project_context
+      dogfood_gate: allowed_family_must_pass
+    session_like_hazard_window:
+      source_family: hermes_session_search
+      useful_fact: generic_user_decision_phrase
+      embedded_hazards: [raw_transcript_vocabulary, tool_call_text, platform_id, private_path]
+      required_safe_output: metadata_only_or_heavily_redacted_content
+      disabled_comparison: disabled_baseline_equal_or_safer_if_usefulness_cannot_be_preserved
+      dogfood_gate: held_synthetic_only
+    ops_event_metadata:
+      source_family: bus_operational_metadata
+      useful_fact: event_type_coarse_time_bucket_and_outcome
+      embedded_hazards: [raw_delivery_id, raw_payload_summary, private_path]
+      required_safe_output: metadata_summary_only_no_raw_ids_or_payloads_ops_private_label
+      disabled_comparison: disabled_baseline_cannot_answer_did_event_happen
+      dogfood_gate: held_synthetic_only
+  required_assertions:
+    - task_relevant_fact_survives
+    - source_label_present
+    - redaction_labels_accurate
+    - no_token_shaped_values
+    - no_credential_refs
+    - no_raw_platform_ids_in_cross_agent_or_reportable_mode
+    - no_private_absolute_paths_in_reportable_mode
+    - truncation_preserves_front_loaded_useful_fact_and_sets_label
+  closure_metrics: [useful_fact_recall_by_family, bytes_before_after, redaction_labels, token_estimate, latency_envelope, residual_hazard_notes]
+
+public_hygiene_scan:
+  purpose: prevent_local_safe_reads_from_being_mistaken_for_public_reportable_artifacts
+  scope: fixture_and_sample_outputs_before_closure_candidate_packets_include_snippets
+  minimum_pass_condition: zero_forbidden_values_while_preserving_metadata_labels_byte_counts_versions_and_coarse_latency
+  forbidden_families:
+    token_shaped_values:
+      deny_patterns: [api_key_like_strings, bearer_tokens, long_opaque_secrets]
+      required_behavior: redact_value_preserve_label_and_byte_counts_only
+      applies_to: all_reportable_outputs
+    credential_refs:
+      deny_patterns: [env_paths, auth_paths, keychain_refs, oauth_refs, credential_file_refs, key_usage_instructions]
+      required_behavior: remove_line_or_replace_with_metadata_label
+      applies_to: all_outputs_local_self_read_also_redacts_secrets
+    raw_platform_ids:
+      deny_patterns: [discord_ids, slack_ids, telegram_ids, thread_ids, message_ids, user_ids, snowflake_like_ids]
+      required_behavior: remove_or_coarsen_unless_explicitly_metadata_safe_and_non_reportable
+      applies_to: cross_agent_and_reportable_outputs
+    private_absolute_paths:
+      deny_patterns: [home_absolute_paths, private_profile_paths, session_log_cache_paths]
+      required_behavior: replace_with_root_ref_or_relative_descriptor_metadata
+      applies_to: reportable_outputs
+    raw_transcript_snippets:
+      deny_patterns: [direct_chat_turns, tool_call_json, gateway_log_lines, session_windows]
+      required_behavior: metadata_only_unless_dedicated_transcript_safe_adapter_exists
+      applies_to: session_like_sources_and_closure_artifacts
+    custody_boundary_confusion:
+      deny_patterns: [seam_write_authority, seam_curates_memory, seam_publishes, seam_reindexes, seam_retires_threads]
+      required_behavior: fail_scan_and_rewrite_artifact_text
+      applies_to: docs_audit_receipts_review_packets
+  if_useful_content_cannot_survive: keep_source_family_held_or_metadata_only
+
+kill_switches:
+  global_seam_reads:
+    effect: all_context_and_recall_return_empty_degraded
+    degraded_label: seam_disabled
+    health: coarse_disabled_state_only
+    cache_action: clear_all_seam_caches
+  source_family:
+    effect: deny_one_family_only
+    degraded_label: source_family_disabled
+    cache_action: clear_family_cache_namespace
+  agent_profile_grant:
+    effect: deny_subject_family_or_mode
+    degraded_label: grant_revoked
+    cache_action: clear_subject_family_descriptor_materializations
+  descriptor_row:
+    effect: disable_exact_descriptor_without_substitution
+    degraded_label: source_not_registered
+    cache_action: clear_descriptor_cache
+  public_artifact_lock:
+    effect: disable_reportable_snippets_globally
+    degraded_label: public_artifact_locked
+    cache_action: clear_reportable_output_cache
+
+review_defaults:
+  registry_home: upstream_reviewed_contract_to_system_pipes_gate_docs_before_runtime_use
+  held_source_rows: keep_session_and_bus_as_held_accounting_rows_but_omit_from_first_allow_path
+  first_dogfood_rung: sax_supervised_pull_only_wiki_and_context_exact_descriptors
+  reportable_output: metadata_receipts_only_until_hygiene_scanner_passes
+  reviewer_set: [jeremy_direction, librarian_custody_boundary, watson_rollout_boundary]
+  first_implementation_after_review: evaluator_only_no_backend_reads
+
+eval_harness_contract:
+  purpose: fixture_only_proof_that_safe_content_remains_useful_vs_disabled_baseline
+  status: draft_no_backend_reads_no_runtime_wiring
+  added_after_live_check: "2026-05-24T11:51:53Z"
+  fixture_object_fields:
+    - fixture_id
+    - source_family
+    - mode
+    - useful_facts
+    - hazards
+    - max_bytes
+    - expected_labels
+    - expected_public_policy
+  allowed_fixture_modes: [local_self, cross_agent, reportable]
+  pipeline:
+    - load_synthetic_fixture
+    - evaluate_grant_before_backend_touch
+    - denied_requests_emit_metadata_only_receipt_without_source_callback
+    - allowed_requests_apply_redaction_and_byte_cap_to_fixture_payload
+    - score_useful_fact_survival_against_disabled_no_seam_baseline
+    - run_public_hygiene_scan_for_reportable_outputs
+    - emit_metadata_only_audit_receipt
+  pass_fail_rules:
+    usefulness:
+      allowed_families: [wiki_gbrain, context_descriptor_files]
+      condition: at_least_one_task_relevant_fact_survives_and_disabled_baseline_cannot_answer
+    safety:
+      condition: no_token_values_credential_refs_raw_platform_ids_private_absolute_paths_or_transcript_snippets_in_reportable_output
+    labeling:
+      condition: redaction_degraded_freshness_and_truncation_labels_are_machine_visible
+    held_family_scope:
+      held_families: [hermes_session_search, bus_operational_metadata]
+      condition: metadata_only_or_not_useful_enough_does_not_block_first_dogfood
+    control_plane:
+      condition: denies_before_simulated_backend_disabled_family_beats_stale_grant_revocation_clears_cache_namespace
+  non_goals:
+    - real_gbrain_queries
+    - hermes_session_database_reads
+    - bus_jsonl_or_sqlite_reads
+    - profile_or_context_file_reads_outside_synthetic_fixtures
+    - hmac_or_scoped_vault_implementation
+    - runtime_service_mcp_config_cron_provider_or_custody_write_behavior
+  first_green_bar:
+    - wiki_curated_project_fact_preserves_owner_posture_next_action_with_labels
+    - context_descriptor_project_note_preserves_descriptor_fact_with_path_redaction_and_truncation_label
+    - session_like_hazard_window_metadata_only_or_held
+    - ops_event_metadata_coarse_metadata_only_no_raw_ids_or_payloads
+    - public_artifact_lock_converts_allowed_snippets_to_metadata_receipts
+
+eval_fixture_corpus:
+  status: synthetic_test_design_only_no_real_sources
+  added_after_live_check: "2026-05-24T12:10:29Z"
+  source_refs_checked:
+    system_pipes_main: "63943e95744e94c0457e9a29dcae608a81d7e2fc"
+    hermes_agent_fork_main: "34ab55b37948a5de491f696888e668a54caa48ba"
+  forbidden_inputs:
+    - real_sessions
+    - profile_files
+    - bus_payloads
+    - credentials
+    - logs
+    - platform_ids
+    - gbrain_calls
+  fixtures:
+    wiki_curated_project_fact:
+      source_family: wiki_gbrain
+      payload_shape: curated_project_note_front_loaded_useful_facts_hazards_later
+      useful_facts: [owner, gate3_posture, next_action]
+      hazard_placeholders: [synthetic_token_shaped_value, synthetic_private_absolute_path, stale_marker]
+      expected_decision: allow_only_sax_supervised_pull_only_after_review
+      expected_output: non_reportable_safe_snippet_or_reportable_redacted_with_labels
+    context_descriptor_project_note:
+      source_family: context_descriptor_files
+      payload_shape: descriptor_inventory_with_root_ref_relative_path_and_oversized_tail
+      useful_facts: [descriptor_title, root_ref, relative_path, project_fact, truncation_state]
+      hazard_placeholders: [protected_path_decoy, synthetic_private_path_text, oversized_tail]
+      expected_decision: allow_only_exact_subject_sax_include_project_descriptor
+      expected_output: root_ref_relative_metadata_no_host_absolute_root_no_path_substitution
+    diary_self_operational_fact:
+      source_family: diary_gbrain
+      payload_shape: sax_owned_handoff_note_with_useful_assumption_before_hazards
+      useful_facts: [handoff_assumption, coarse_timestamp_bucket]
+      hazard_placeholders: [synthetic_cross_agent_diary_phrase, synthetic_platform_id_shape, credential_ref_placeholder]
+      expected_decision: held_for_first_dogfood_unless_reviewed
+      expected_output: if_later_allowed_reportable_removes_id_and_ref_placeholders_with_labels
+    session_like_hazard_window:
+      source_family: hermes_session_search
+      payload_shape: fake_transcript_shaped_window_with_generic_decision_phrase
+      useful_facts: [generic_decision_phrase_if_safely_recoverable]
+      hazard_placeholders: [transcript_vocabulary, fake_tool_call_json, synthetic_platform_id_shape, private_path_placeholder]
+      expected_decision: held_or_metadata_only
+      expected_output: no_public_transcript_snippets
+    ops_event_metadata:
+      source_family: bus_operational_metadata
+      payload_shape: fake_event_summary_with_type_coarse_time_and_outcome
+      useful_facts: [event_type, coarse_time_bucket, outcome]
+      hazard_placeholders: [raw_delivery_id_placeholder, payload_summary_placeholder, private_path_placeholder]
+      expected_decision: held_or_metadata_only
+      expected_output: answer_did_event_happen_without_raw_ids_or_payloads
+    public_artifact_lock_case:
+      source_family: cross_family_policy
+      payload_shape: otherwise_allowed_wiki_or_context_fixture_with_reportable_snippet_requested
+      useful_facts: [source_family, subject, decision, labels, byte_counts]
+      hazard_placeholders: [snippet_body]
+      expected_decision: public_artifact_locked
+      expected_output: metadata_receipt_only_no_snippet_body
+  minimum_checks_before_code_rows:
+    - fixtures_live_under_test_or_spec_data_not_real_memory_profile_session_paths
+    - grant_evaluator_called_before_simulated_backend_callback_and_denied_cases_have_zero_callbacks
+    - reportable_hygiene_scan_rejects_token_refs_ids_paths_transcripts_and_custody_boundary_confusion
+    - usefulness_scoring_compares_allowed_fixture_against_disabled_and_leak_prevention_only_baselines
+    - receipts_are_metadata_only_with_fixture_family_subject_decision_labels_bytes_versions_latency_bucket_cache_action
+
+review_decision_contract:
+  purpose: smallest_operator_review_needed_before_any_code_row
+  missing_or_ambiguous_answer_default: hold_implementation
+  required_fields:
+    registry_home:
+      recommended_default: system_pipes_gate_docs_after_review
+      why: gate3_anchor_repo_is_system_pipes_and_local_sax_draft_is_not_activation_authority
+    first_allowed_families:
+      recommended_default: [wiki_gbrain, context_descriptor_files]
+      explicit_exclusions: [diary_gbrain, hermes_session_search, bus_operational_metadata, qmd_regression, librarian_write_paths]
+    held_rows_policy:
+      recommended_default: keep_session_and_bus_visible_as_docs_only_blast_radius_accounting_rows
+      runtime_effect: omit_from_first_allow_path
+    grant_posture:
+      recommended_default: sax_only_supervised_pull_only
+      denied_modes: [startup, turn, cron, runtime, write_request]
+      denied_subjects: [watson, librarian, terminal, builder_and_workers, cron_unsupervised, network_multi_user_multi_machine]
+    reportable_output:
+      recommended_default: metadata_only_receipts_until_hygiene_scanner_passes
+      snippet_policy: local_non_reportable_by_default
+    reviewers:
+      recommended_default: [jeremy_direction, librarian_custody_boundary, watson_rollout_boundary]
+    implementation_go:
+      recommended_default: no_until_the_above_are_explicitly_reviewed
+      if_yes_scope: evaluator_only_fixture_only_no_backend_reads_no_services_no_global_config_no_custody_writes
+
+operator_review_ballot:
+  status: docs_control_plane_review_only_not_activation_authority
+  added_after_live_check: "2026-05-24T13:05:13Z"
+  source_refs_checked:
+    system_pipes_main: "63943e95744e94c0457e9a29dcae608a81d7e2fc"
+    hermes_agent_fork_main: "34ab55b37948a5de491f696888e668a54caa48ba"
+    gate3_posture: not_closed_contract_authoritative_implementation_held
+  does_not_authorize:
+    - memory_seam_read_activation
+    - gate3_closure_or_status_promotion
+    - cron_unsupervised_network_or_multi_user_use
+    - custody_write_reindex_thread_retirement_or_publish_authority
+    - backend_reads_or_runtime_wiring
+  options:
+    registry_home:
+      recommended_answer: system_pipes_gate_docs_after_review
+      alternate_allowed: name_another_authority
+    first_allowed_families:
+      recommended_answer: [wiki_gbrain, context_descriptor_files]
+      exclusions: [diary_gbrain, hermes_session_search, bus_operational_metadata, qmd_regression, librarian_write_paths]
+    held_rows_policy:
+      recommended_answer: keep_session_and_bus_visible_as_held_accounting_rows_omit_from_first_allow_path
+    grant_posture:
+      recommended_answer: sax_only_supervised_pull_only_no_startup_turn_cron_runtime_or_write_request
+    reportable_output:
+      recommended_answer: metadata_only_receipts_until_hygiene_scanner_passes
+    reviewers:
+      recommended_answer: [jeremy_direction, librarian_custody_boundary, watson_rollout_boundary]
+    implementation_go:
+      recommended_answer: no
+      only_yes_shape: evaluator_only_fixture_only_no_backend_reads
+      missing_or_ambiguous: hold_implementation
+
+audit_receipts:
+  allowed: [timestamp, subject, source_family, scope_or_include, decision, degraded_label, redaction_labels, byte_counts, latency_ms, cache_hit_boolean, registry_version, grant_version]
+  forbidden: [raw_content, raw_session_text, secrets, token_values, credential_refs, private_absolute_paths, raw_platform_ids]
+
+sanitized_receipt_schema:
+  status: schema_design_only_not_runtime_logging_not_activation_authority
+  added_after_live_check: "2026-05-24T12:46:50Z"
+  purpose: prove_control_plane_decisions_without_exposing_shelf_contents
+  export_policy: public_or_reportable_packets_include_receipt_metadata_only_no_snippet_body
+  required_fields:
+    receipt_version:
+      required: true
+      allowed_shape: fixed_string_memory_seam_receipt_v0
+      forbidden: runtime_config_authority_claims
+    fixture_id:
+      required_for_eval: true
+      allowed_shape: synthetic_fixture_id_only
+      forbidden: [real_session_id, thread_id, message_id]
+    subject:
+      required: true
+      allowed_shape: agent_or_profile_slug
+      forbidden: [user_ids, platform_ids, email, auth_subject_tokens]
+    source_family:
+      required: true
+      allowed_shape: registry_family_id
+      forbidden: [raw_path, database_path, backend_connection_string]
+    scope_or_include:
+      required: true
+      allowed_shape: closed_enum_scope_or_include
+      forbidden: arbitrary_path_or_query_expansion
+    mode:
+      required: true
+      allowed_shape: reviewed_mode_enum
+      forbidden: silent_promotion_to_startup_turn_cron_or_runtime
+    decision:
+      required: true
+      allowed_values: [allow_metadata, allow_non_reportable_snippet, deny, degrade_metadata_only]
+      forbidden: raw_content_echo
+    degraded_label:
+      required_when_applicable: true
+      allowed_shape: one_machine_label
+      forbidden: free_text_private_explanation_copied_from_source
+    redaction_labels:
+      required: true
+      allowed_shape: label_list_and_counts_only
+      forbidden: redacted_values_themselves
+    useful_fact_score:
+      required_for_eval: true
+      allowed_shape: count_or_boolean_of_expected_synthetic_facts_preserved
+      forbidden: [source_text, private_quotes]
+    byte_counts:
+      required: true
+      allowed_shape: before_after_truncated_integers_from_synthetic_payload_or_adapter_output
+      forbidden: raw_payload_body
+    latency_bucket:
+      required: true
+      allowed_values: [lt_10ms, lt_100ms, timeout]
+      forbidden: detailed_host_or_process_trace
+    cache_action:
+      required: true
+      allowed_values: [none, clear_family, clear_subject, clear_descriptor, clear_all]
+      forbidden: cache_keys_containing_paths_or_session_ids
+    registry_version:
+      required: true
+      allowed_shape: opaque_version_string
+      forbidden: file_contents_or_git_secrets
+    grant_version:
+      required: true
+      allowed_shape: opaque_version_string
+      forbidden: file_contents_or_git_secrets
+    backend_callback_count:
+      required_for_deny_tests: true
+      allowed_shape: integer_zero_for_denies
+      forbidden: backend_result_snippets
+  examples:
+    metadata_only_deny:
+      receipt_version: memory_seam_receipt_v0
+      fixture_id: builder_wiki_deny
+      subject: builder
+      source_family: wiki_gbrain
+      scope_or_include: wiki
+      mode: supervised
+      decision: deny
+      degraded_label: grant_missing
+      redaction_labels: []
+      useful_fact_score: 0
+      byte_counts: {before: 0, after: 0, truncated: false}
+      latency_bucket: lt_10ms
+      cache_action: none
+      registry_version: memory_seam_control_plane_v0_draft
+      grant_version: grant_matrix_v0_draft
+      backend_callback_count: 0
+    useful_safe_fixture:
+      receipt_version: memory_seam_receipt_v0
+      fixture_id: wiki_curated_project_fact
+      subject: sax
+      source_family: wiki_gbrain
+      scope_or_include: wiki
+      mode: supervised
+      decision: allow_non_reportable_snippet
+      degraded_label: null
+      redaction_labels: [token_shaped_values, private_absolute_paths, stale_index]
+      useful_fact_score: 3
+      byte_counts: {before: 640, after: 320, truncated: true}
+      latency_bucket: lt_10ms
+      cache_action: none
+      registry_version: memory_seam_control_plane_v0_draft
+      grant_version: grant_matrix_v0_draft
+      backend_callback_count: 1
+
+review_readiness_ledger:
+  added_after_live_check: "2026-05-24T12:28:39Z"
+  source_refs_checked:
+    system_pipes_main: "63943e95744e94c0457e9a29dcae608a81d7e2fc"
+    hermes_agent_fork_main: "34ab55b37948a5de491f696888e668a54caa48ba"
+    gate3_posture: not_closed_implementation_held
+  purpose: final_docs_only_guardrail_before_any_implementation_row
+  checkpoints:
+    registry_authority:
+      ready_artifact: markdown_stocktake_and_yaml_source_families
+      default_if_unanswered: sax_local_draft_non_authoritative
+      code_implication: no_runtime_import_of_registry_data
+    first_allow_path:
+      ready_artifact: sax_supervised_pull_only_wiki_gbrain_and_context_descriptor_files_only
+      default_if_unanswered: deny_all_runtime_grants
+      code_implication: no_evaluator_code_unless_approved
+    held_source_rows:
+      ready_artifact: session_bus_diary_qmd_librarian_rows_visible_for_blast_radius_accounting
+      default_if_unanswered: held_or_metadata_only
+      code_implication: no_backend_adapters_for_held_rows
+    useful_content_proof:
+      ready_artifact: fixture_only_harness_spec_and_six_synthetic_corpus_cases
+      default_if_unanswered: continue_docs_eval_refinement
+      code_implication: no_real_gbrain_session_bus_profile_reads
+    rollback_proof:
+      ready_artifact: global_family_grant_descriptor_public_artifact_lock_semantics
+      default_if_unanswered: rollback_unproven
+      code_implication: no_dogfood_beyond_metadata_evaluator_after_review
+    public_reportable_hygiene:
+      ready_artifact: six_forbidden_families_and_metadata_only_receipts
+      default_if_unanswered: no_reportable_snippets
+      code_implication: closure_artifacts_metadata_only
+    custody_boundary:
+      ready_artifact: seam_has_no_write_custody_reindex_thread_retirement_authority
+      default_if_unanswered: librarian_only_custody_stands
+      code_implication: no_write_like_routes_or_custody_tool_calls
+    auth_expansion:
+      ready_artifact: hmac_scoped_vault_and_acting_for_held
+      default_if_unanswered: local_supervised_only
+      code_implication: no_cron_network_multi_user_or_multi_machine_use
+  sax_call: docs_ready_for_review_not_activation_evaluator_only_fixture_only_is_smallest_post_review_code_row
