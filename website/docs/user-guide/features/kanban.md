@@ -683,6 +683,11 @@ hermes kanban notify-subscribe <id>                    # gateway bridge hook (us
 hermes kanban notify-list [<id>] [--json]
 hermes kanban notify-unsubscribe <id>
         --platform <name> --chat-id <id> [--thread-id <id>]
+hermes kanban notify-default-subscribe                # board default for NEW tasks
+        --platform <name> --chat-id <id> [--thread-id <id>] [--user-id <id>]
+hermes kanban notify-default-list [--json]
+hermes kanban notify-default-unsubscribe
+        --platform <name> --chat-id <id> [--thread-id <id>]
 hermes kanban context <id>                             # what a worker sees
 hermes kanban specify [<id> | --all] [--tenant T]      # flesh out a triage-column idea
         [--author NAME] [--json]                       #   into a full spec and promote to todo
@@ -847,7 +852,15 @@ hermes kanban notify-unsubscribe t_abcd \
     --platform telegram --chat-id 12345678 --thread-id 7
 ```
 
-A subscription removes itself automatically once the task reaches `done` or `archived`; no cleanup needed.
+For dashboard-created tasks or other sources that do not have an originating gateway chat, add a board-level default. Defaults apply only to tasks created after the default is added, so enabling one on a busy board will not replay old terminal events:
+
+```bash
+hermes kanban --board atlas-flow notify-default-subscribe \
+    --platform discord --chat-id 1505595939723673670 --notifier-profile sax
+hermes kanban --board atlas-flow notify-default-list
+```
+
+A per-task subscription removes itself automatically once the task reaches `done` or `archived`; no cleanup needed. Board defaults stay in place until removed with `notify-default-unsubscribe`.
 
 ## Runs — one row per attempt
 

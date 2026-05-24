@@ -868,6 +868,42 @@ def test_cli_notify_subscribe_and_list(kanban_home):
     assert "Unsubscribed" in rm
 
 
+def test_cli_notify_default_subscribe_applies_to_future_tasks_only(kanban_home):
+    old_tid = json.loads(run_slash("create 'old task' --json"))["id"]
+
+    out = run_slash(
+        "notify-default-subscribe --platform telegram --chat-id 999 --notifier-profile sax"
+    )
+    assert "Subscribed new board tasks" in out
+
+    defaults = json.loads(run_slash("notify-default-list --json"))
+    assert defaults == [
+        {
+            "platform": "telegram",
+            "chat_id": "999",
+            "thread_id": "",
+            "user_id": None,
+            "notifier_profile": "sax",
+            "created_at": defaults[0]["created_at"],
+        }
+    ]
+
+    new_tid = json.loads(run_slash("create 'new task' --json"))["id"]
+    subs = json.loads(run_slash("notify-list --json"))
+    assert not any(s["task_id"] == old_tid for s in subs)
+    assert any(
+        s["task_id"] == new_tid
+        and s["platform"] == "telegram"
+        and s["chat_id"] == "999"
+        and s["notifier_profile"] == "sax"
+        for s in subs
+    )
+
+    rm = run_slash("notify-default-unsubscribe --platform telegram --chat-id 999")
+    assert "Unsubscribed new board tasks" in rm
+    assert json.loads(run_slash("notify-default-list --json")) == []
+
+
 def test_cli_log_missing_task(kanban_home):
     # No such task → exit-style (no log for...) message on stderr, returned
     # in combined output.

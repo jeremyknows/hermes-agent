@@ -105,6 +105,65 @@ def test_kanban_notifier_claim_prevents_second_watcher_send(tmp_path, monkeypatc
     assert adapter2.sent == []
 
 
+def test_board_default_notify_subscribes_new_dashboard_tasks(tmp_path, monkeypatch):
+    """Board defaults cover dashboard-created tasks without per-task toggles.
+
+    Dashboard creates tasks directly through kb.create_task(), not through the
+    Discord /kanban create path that auto-subscribes the origin. A board-level
+    default should attach a normal kanban_notify_subs row at task creation so
+    the existing gateway notifier can deliver only future terminal events.
+    """
+    db_path = tmp_path / "board-default.db"
+    monkeypatch.setenv("HERMES_KANBAN_DB", str(db_path))
+    kb.init_db()
+
+    conn = kb.connect()
+    try:
+        kb.add_notify_default(
+            conn,
+            platform="telegram",
+            chat_id="chat-1",
+            notifier_profile="default",
+        )
+        tid = kb.create_task(conn, title="dashboard task", assignee="worker")
+        subs = kb.list_notify_subs(conn, tid)
+        assert len(subs) == 1
+        assert subs[0]["platform"] == "telegram"
+        assert subs[0]["chat_id"] == "chat-1"
+        assert subs[0]["notifier_profile"] == "default"
+        kb.complete_task(conn, tid, summary="dashboard done")
+    finally:
+        conn.close()
+
+    adapter = RecordingAdapter()
+    asyncio.run(_run_one_notifier_tick(monkeypatch, _make_runner(adapter)))
+
+    assert len(adapter.sent) == 1
+    assert tid in adapter.sent[0]["text"]
+    assert "dashboard done" in adapter.sent[0]["text"]
+
+
+def test_board_default_notify_does_not_backfill_existing_tasks(tmp_path, monkeypatch):
+    """Adding a board default must not subscribe old tasks and flood history."""
+    db_path = tmp_path / "board-default-no-backfill.db"
+    monkeypatch.setenv("HERMES_KANBAN_DB", str(db_path))
+    kb.init_db()
+
+    conn = kb.connect()
+    try:
+        old_tid = kb.create_task(conn, title="old dashboard task", assignee="worker")
+        kb.add_notify_default(conn, platform="telegram", chat_id="chat-1")
+        assert kb.list_notify_subs(conn, old_tid) == []
+        kb.complete_task(conn, old_tid, summary="old done")
+    finally:
+        conn.close()
+
+    adapter = RecordingAdapter()
+    asyncio.run(_run_one_notifier_tick(monkeypatch, _make_runner(adapter)))
+
+    assert adapter.sent == []
+
+
 def test_kanban_notifier_rewinds_claim_if_adapter_disconnects(tmp_path, monkeypatch):
     db_path = tmp_path / "adapter-disconnect.db"
     monkeypatch.setenv("HERMES_KANBAN_DB", str(db_path))

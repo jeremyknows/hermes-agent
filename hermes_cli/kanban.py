@@ -706,6 +706,33 @@ def build_parser(parent_subparsers: argparse._SubParsersAction) -> argparse.Argu
     p_nrm.add_argument("--chat-id", required=True)
     p_nrm.add_argument("--thread-id", default=None)
 
+    p_ndsub = sub.add_parser(
+        "notify-default-subscribe",
+        help="Subscribe every new task on this board to a gateway target's terminal events",
+    )
+    p_ndsub.add_argument("--platform", required=True)
+    p_ndsub.add_argument("--chat-id", required=True)
+    p_ndsub.add_argument("--thread-id", default=None)
+    p_ndsub.add_argument("--user-id", default=None)
+    p_ndsub.add_argument(
+        "--notifier-profile", default=None,
+        help="Profile gateway that owns/delivers this board default (default: active profile)",
+    )
+
+    p_ndlist = sub.add_parser(
+        "notify-default-list",
+        help="List board-level default notification targets for new tasks",
+    )
+    p_ndlist.add_argument("--json", action="store_true")
+
+    p_ndrm = sub.add_parser(
+        "notify-default-unsubscribe",
+        help="Remove a board-level default notification target",
+    )
+    p_ndrm.add_argument("--platform", required=True)
+    p_ndrm.add_argument("--chat-id", required=True)
+    p_ndrm.add_argument("--thread-id", default=None)
+
     # --- log ---
     p_log = sub.add_parser(
         "log",
@@ -964,6 +991,9 @@ def kanban_command(args: argparse.Namespace) -> int:
         "notify-subscribe":   _cmd_notify_subscribe,
         "notify-list":        _cmd_notify_list,
         "notify-unsubscribe": _cmd_notify_unsubscribe,
+        "notify-default-subscribe":   _cmd_notify_default_subscribe,
+        "notify-default-list":        _cmd_notify_default_list,
+        "notify-default-unsubscribe": _cmd_notify_default_unsubscribe,
         "context":  _cmd_context,
         "specify":  _cmd_specify,
         "decompose":  _cmd_decompose,
@@ -2474,6 +2504,54 @@ def _cmd_notify_unsubscribe(args: argparse.Namespace) -> int:
         print("(no such subscription)", file=sys.stderr)
         return 1
     print(f"Unsubscribed from {args.task_id}")
+    return 0
+
+
+def _cmd_notify_default_subscribe(args: argparse.Namespace) -> int:
+    with kb.connect() as conn:
+        kb.add_notify_default(
+            conn,
+            platform=args.platform,
+            chat_id=args.chat_id,
+            thread_id=args.thread_id,
+            user_id=args.user_id,
+            notifier_profile=args.notifier_profile or _profile_author(),
+        )
+    print(
+        f"Subscribed new board tasks to {args.platform}:{args.chat_id}"
+        + (f":{args.thread_id}" if args.thread_id else "")
+    )
+    return 0
+
+
+def _cmd_notify_default_list(args: argparse.Namespace) -> int:
+    with kb.connect() as conn:
+        defaults = kb.list_notify_defaults(conn)
+    if getattr(args, "json", False):
+        print(json.dumps(defaults, indent=2, ensure_ascii=False))
+        return 0
+    if not defaults:
+        print("(no board default subscriptions)")
+        return 0
+    for d in defaults:
+        thr = f":{d['thread_id']}" if d.get("thread_id") else ""
+        owner = f"  owner={d['notifier_profile']}" if d.get("notifier_profile") else ""
+        print(f"  {d['platform']}:{d['chat_id']}{thr}{owner}")
+    return 0
+
+
+def _cmd_notify_default_unsubscribe(args: argparse.Namespace) -> int:
+    with kb.connect() as conn:
+        ok = kb.remove_notify_default(
+            conn,
+            platform=args.platform,
+            chat_id=args.chat_id,
+            thread_id=args.thread_id,
+        )
+    if not ok:
+        print("(no such board default subscription)", file=sys.stderr)
+        return 1
+    print(f"Unsubscribed new board tasks from {args.platform}:{args.chat_id}")
     return 0
 
 

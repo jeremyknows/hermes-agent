@@ -1111,6 +1111,22 @@ CREATE INDEX IF NOT EXISTS idx_runs_task             ON task_runs(task_id, start
 CREATE INDEX IF NOT EXISTS idx_runs_status           ON task_runs(status);
 CREATE INDEX IF NOT EXISTS idx_attachments_task      ON task_attachments(task_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_notify_task           ON kanban_notify_subs(task_id);
+
+-- Board-level default notification targets. These are copied into
+-- kanban_notify_subs for NEW tasks created on this board, including tasks
+-- created by the dashboard backend (which does not have a Discord/Telegram
+-- request source to auto-subscribe). Existing tasks are intentionally not
+-- backfilled when a default is added, preventing historical terminal-event
+-- floods on busy boards.
+CREATE TABLE IF NOT EXISTS kanban_notify_defaults (
+    platform      TEXT NOT NULL,
+    chat_id       TEXT NOT NULL,
+    thread_id     TEXT NOT NULL DEFAULT '',
+    user_id       TEXT,
+    notifier_profile TEXT,
+    created_at    INTEGER NOT NULL,
+    PRIMARY KEY (platform, chat_id, thread_id)
+);
 """
 
 
@@ -2256,6 +2272,7 @@ def create_task(
                         "goal_mode": bool(goal_mode) or None,
                     },
                 )
+                _apply_notify_defaults_for_task(conn, task_id, now=now)
             return task_id
         except sqlite3.IntegrityError:
             if attempt == 1:
@@ -7133,6 +7150,95 @@ def task_age(task: Task) -> dict:
 # ---------------------------------------------------------------------------
 # Notification subscriptions (used by the gateway kanban-notifier)
 # ---------------------------------------------------------------------------
+
+def add_notify_default(
+    conn: sqlite3.Connection,
+    *,
+    platform: str,
+    chat_id: str,
+    thread_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+    notifier_profile: Optional[str] = None,
+) -> None:
+    """Register a board-level default notification target for new tasks.
+
+    Defaults live inside the current board DB. They are copied to
+    ``kanban_notify_subs`` only when future tasks are created; existing tasks
+    are not backfilled so enabling a default cannot replay old terminal events.
+    """
+    now = int(time.time())
+    with write_txn(conn):
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO kanban_notify_defaults
+                (platform, chat_id, thread_id, user_id, notifier_profile, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (platform, chat_id, thread_id or "", user_id, notifier_profile, now),
+        )
+        conn.execute(
+            """
+            UPDATE kanban_notify_defaults
+               SET user_id = ?, notifier_profile = ?
+             WHERE platform = ? AND chat_id = ? AND thread_id = ?
+            """,
+            (user_id, notifier_profile, platform, chat_id, thread_id or ""),
+        )
+
+
+def list_notify_defaults(conn: sqlite3.Connection) -> list[dict]:
+    rows = conn.execute(
+        "SELECT * FROM kanban_notify_defaults ORDER BY created_at, platform, chat_id, thread_id"
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def remove_notify_default(
+    conn: sqlite3.Connection,
+    *,
+    platform: str,
+    chat_id: str,
+    thread_id: Optional[str] = None,
+) -> bool:
+    with write_txn(conn):
+        cur = conn.execute(
+            "DELETE FROM kanban_notify_defaults WHERE platform = ? AND chat_id = ? AND thread_id = ?",
+            (platform, chat_id, thread_id or ""),
+        )
+    return cur.rowcount > 0
+
+
+def _apply_notify_defaults_for_task(
+    conn: sqlite3.Connection,
+    task_id: str,
+    *,
+    now: Optional[int] = None,
+) -> None:
+    """Copy board-level defaults into per-task subscriptions for a new task.
+
+    Caller must already hold the write transaction. Kept private so defaults
+    remain creation-time only instead of a history-backfill mechanism.
+    """
+    created_at = int(now if now is not None else time.time())
+    defaults = conn.execute("SELECT * FROM kanban_notify_defaults").fetchall()
+    for d in defaults:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO kanban_notify_subs
+                (task_id, platform, chat_id, thread_id, user_id, notifier_profile, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                task_id,
+                d["platform"],
+                d["chat_id"],
+                d["thread_id"] or "",
+                d["user_id"],
+                d["notifier_profile"],
+                created_at,
+            ),
+        )
+
 
 def add_notify_sub(
     conn: sqlite3.Connection,
