@@ -5370,6 +5370,28 @@ class GatewayRunner:
                         )
                         continue
                     title = (task.title if task else sub["task_id"])[:120]
+
+                    def _first_line(value: Any, limit: int) -> str:
+                        lines = str(value or "").strip().splitlines()
+                        return lines[0][:limit] if lines else ""
+
+                    def _receipt(
+                        icon: str,
+                        status: str,
+                        *,
+                        detail_label: str | None = None,
+                        detail: str = "",
+                        next_action: str,
+                    ) -> str:
+                        lines = [
+                            f"{icon} {tag}Kanban {sub['task_id']} {status}",
+                            f"Title: {title}",
+                        ]
+                        if detail_label and detail:
+                            lines.append(f"{detail_label}: {detail}")
+                        lines.append(f"Next: {next_action}")
+                        return "\n".join(lines)
+
                     for ev in d["events"]:
                         kind = ev.kind
                         # Identity prefix: attribute terminal pings to the
@@ -5384,44 +5406,61 @@ class GatewayRunner:
                             # task.result for legacy rows written before
                             # runs shipped.
                             handoff = ""
-                            payload_summary = None
                             if ev.payload and ev.payload.get("summary"):
-                                payload_summary = str(ev.payload["summary"])
-                            if payload_summary:
-                                h = payload_summary.strip().splitlines()[0][:200]
-                                handoff = f"\n{h}"
+                                handoff = _first_line(ev.payload["summary"], 200)
                             elif task and task.result:
-                                r = task.result.strip().splitlines()[0][:160]
-                                handoff = f"\n{r}"
-                            msg = (
-                                f"✔ {tag}Kanban {sub['task_id']} done"
-                                f" — {title}{handoff}"
+                                handoff = _first_line(task.result, 160)
+                            msg = _receipt(
+                                "✔",
+                                "completed",
+                                detail_label="Summary",
+                                detail=handoff,
+                                next_action=f"review result or /kanban show {sub['task_id']}",
                             )
                         elif kind == "blocked":
                             reason = ""
                             if ev.payload and ev.payload.get("reason"):
-                                reason = f": {str(ev.payload['reason'])[:160]}"
-                            msg = f"⏸ {tag}Kanban {sub['task_id']} blocked{reason}"
+                                reason = _first_line(ev.payload["reason"], 160)
+                            msg = _receipt(
+                                "⏸",
+                                "blocked",
+                                detail_label="Reason",
+                                detail=reason,
+                                next_action=(
+                                    f"reply with context, then /kanban unblock {sub['task_id']}"
+                                ),
+                            )
                         elif kind == "gave_up":
                             err = ""
                             if ev.payload and ev.payload.get("error"):
-                                err = f"\n{str(ev.payload['error'])[:200]}"
-                            msg = (
-                                f"✖ {tag}Kanban {sub['task_id']} gave up "
-                                f"after repeated spawn failures{err}"
+                                err = _first_line(ev.payload["error"], 200)
+                            msg = _receipt(
+                                "✖",
+                                "gave up",
+                                detail_label="Error",
+                                detail=err,
+                                next_action=f"inspect with /kanban show {sub['task_id']}",
                             )
                         elif kind == "crashed":
-                            msg = (
-                                f"✖ {tag}Kanban {sub['task_id']} worker crashed "
-                                f"(pid gone); dispatcher will retry"
+                            msg = _receipt(
+                                "✖",
+                                "crashed",
+                                next_action=(
+                                    f"dispatcher will retry; inspect with /kanban show {sub['task_id']}"
+                                ),
                             )
                         elif kind == "timed_out":
                             limit = 0
                             if ev.payload and ev.payload.get("limit_seconds"):
                                 limit = int(ev.payload["limit_seconds"])
-                            msg = (
-                                f"⏱ {tag}Kanban {sub['task_id']} timed out "
-                                f"(max_runtime={limit}s); will retry"
+                            msg = _receipt(
+                                "⏱",
+                                "timed out",
+                                detail_label="Limit",
+                                detail=f"{limit}s",
+                                next_action=(
+                                    f"dispatcher will retry; inspect with /kanban show {sub['task_id']}"
+                                ),
                             )
                         else:
                             continue

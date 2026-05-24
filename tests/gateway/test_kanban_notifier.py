@@ -143,6 +143,102 @@ def test_board_default_notify_subscribes_new_dashboard_tasks(tmp_path, monkeypat
     assert "dashboard done" in adapter.sent[0]["text"]
 
 
+def test_kanban_notifier_completion_uses_receipt_card_format(tmp_path, monkeypatch):
+    """Completion receipts should say outcome, title, summary, and next action."""
+    db_path = tmp_path / "completion-receipt-card.db"
+    monkeypatch.setenv("HERMES_KANBAN_DB", str(db_path))
+    kb.init_db()
+
+    tid = _create_completed_subscription(summary="finished cleanly\nextra detail")
+
+    adapter = RecordingAdapter()
+    asyncio.run(_run_one_notifier_tick(monkeypatch, _make_runner(adapter)))
+
+    assert adapter.sent == [
+        {
+            "chat_id": "chat-1",
+            "metadata": {},
+            "text": (
+                f"✔ @worker Kanban {tid} completed\n"
+                "Title: notify once\n"
+                "Summary: finished cleanly\n"
+                f"Next: review result or /kanban show {tid}"
+            ),
+        }
+    ]
+
+
+def test_kanban_notifier_blocked_uses_receipt_card_format(tmp_path, monkeypatch):
+    """Blocked receipts should expose the action hint instead of a terse alert."""
+    db_path = tmp_path / "blocked-receipt-card.db"
+    monkeypatch.setenv("HERMES_KANBAN_DB", str(db_path))
+    kb.init_db()
+
+    conn = kb.connect()
+    try:
+        tid = kb.create_task(conn, title="needs context", assignee="worker")
+        kb.add_notify_sub(conn, task_id=tid, platform="telegram", chat_id="chat-1")
+        assert kb.block_task(conn, tid, reason="need API decision\nmore detail")
+    finally:
+        conn.close()
+
+    adapter = RecordingAdapter()
+    asyncio.run(_run_one_notifier_tick(monkeypatch, _make_runner(adapter)))
+
+    assert adapter.sent == [
+        {
+            "chat_id": "chat-1",
+            "metadata": {},
+            "text": (
+                f"⏸ @worker Kanban {tid} blocked\n"
+                "Title: needs context\n"
+                "Reason: need API decision\n"
+                f"Next: reply with context, then /kanban unblock {tid}"
+            ),
+        }
+    ]
+
+
+def test_kanban_notifier_retry_failures_use_receipt_card_format(tmp_path, monkeypatch):
+    """Retry/failure receipts should include title and inspection next action."""
+    db_path = tmp_path / "retry-failure-receipt-card.db"
+    monkeypatch.setenv("HERMES_KANBAN_DB", str(db_path))
+    kb.init_db()
+
+    conn = kb.connect()
+    try:
+        tid = kb.create_task(conn, title="retry me", assignee="worker")
+        kb.add_notify_sub(conn, task_id=tid, platform="telegram", chat_id="chat-1")
+        kb._append_event(conn, tid, kind="crashed")
+        kb._append_event(conn, tid, kind="timed_out", payload={"limit_seconds": 30})
+        kb._append_event(conn, tid, kind="gave_up", payload={"error": "spawn failed\nstack"})
+    finally:
+        conn.close()
+
+    adapter = RecordingAdapter()
+    asyncio.run(_run_one_notifier_tick(monkeypatch, _make_runner(adapter)))
+
+    assert [item["text"] for item in adapter.sent] == [
+        (
+            f"✖ @worker Kanban {tid} crashed\n"
+            "Title: retry me\n"
+            f"Next: dispatcher will retry; inspect with /kanban show {tid}"
+        ),
+        (
+            f"⏱ @worker Kanban {tid} timed out\n"
+            "Title: retry me\n"
+            "Limit: 30s\n"
+            f"Next: dispatcher will retry; inspect with /kanban show {tid}"
+        ),
+        (
+            f"✖ @worker Kanban {tid} gave up\n"
+            "Title: retry me\n"
+            "Error: spawn failed\n"
+            f"Next: inspect with /kanban show {tid}"
+        ),
+    ]
+
+
 def test_board_default_notify_does_not_backfill_existing_tasks(tmp_path, monkeypatch):
     """Adding a board default must not subscribe old tasks and flood history."""
     db_path = tmp_path / "board-default-no-backfill.db"
