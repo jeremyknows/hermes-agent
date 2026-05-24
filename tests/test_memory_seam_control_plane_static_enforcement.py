@@ -65,6 +65,39 @@ def _evaluate_wiki_fixture_access(
     }
 
 
+def _evaluate_context_descriptor_fixture_access(
+    control_plane: dict,
+    *,
+    subject: str,
+    include: str,
+    mode: str,
+    family_enabled: bool = True,
+) -> dict:
+    family = control_plane["source_families"]["context_descriptor_files"]
+    sax_grant = control_plane["grant_matrix"]["sax"]["context_descriptor_files"]
+
+    if not family_enabled:
+        return {
+            "decision": "deny",
+            "degraded_label": family["rollback_semantics"]["disable_label"],
+        }
+
+    if subject != "sax":
+        return {"decision": "deny", "degraded_label": "grant_missing"}
+
+    if mode not in sax_grant["modes"]:
+        return {"decision": "deny", "degraded_label": "grant_mode_denied"}
+
+    if include not in family["allowed_includes"] or include not in sax_grant["includes"]:
+        return {"decision": "deny", "degraded_label": "source_not_registered"}
+
+    return {
+        "decision": "allow_metadata",
+        "redaction_profile": family["redaction_profile"],
+        "cache_namespace": family["rollback_semantics"]["cache_namespace"],
+    }
+
+
 def test_wiki_registry_fixture_matches_control_plane_source_family() -> None:
     control_plane = _load_control_plane()
     fixture = _load_fixture("wiki_gbrain_registry_fixture.yaml")
@@ -141,4 +174,89 @@ def test_wiki_fail_closed_negative_fixtures_stay_denied() -> None:
     assert (
         acceptance_cases["public_artifact_lock_deny"]["expected_degraded_label"]
         == "public_artifact_locked"
+    )
+
+
+def test_context_descriptor_registry_fixture_matches_control_plane_source_family() -> None:
+    control_plane = _load_control_plane()
+    fixture = _load_fixture("context_descriptor_files_registry_fixture.yaml")
+
+    family = control_plane["source_families"][fixture["family_id"]]
+
+    assert family["owner"] == fixture["owner"]
+    assert family["allowed_scopes"] == fixture["allowed_scopes"]
+    assert family["allowed_includes"] == fixture["allowed_includes"]
+    assert family["private_class"] == fixture["private_class"]
+    assert family["redaction_profile"] == fixture["redaction_profile"]
+    assert family["allowed_posture"] == fixture["allowed_posture"]
+    assert family["fallback_labels"] == fixture["fallback_labels"]
+    assert family["public_artifact_policy"] == fixture["public_artifact_policy"]
+    assert family["rollback_semantics"] == fixture["rollback_semantics"]
+
+
+def test_context_descriptor_grant_fixture_matches_sax_grant_row() -> None:
+    control_plane = _load_control_plane()
+    fixture = _load_fixture("context_descriptor_files_grant_fixture.yaml")
+
+    grant = control_plane["grant_matrix"][fixture["subject"]][fixture["source_family"]]
+    defaults = control_plane["defaults"]
+
+    assert grant["decision"] == fixture["decision"]
+    assert grant["modes"] == fixture["modes"]
+    assert grant["includes"] == fixture["includes"]
+    assert grant["denied_modes"] == fixture["denied_modes"]
+    assert defaults["posture"] == fixture["posture"]
+
+    allow_result = _evaluate_context_descriptor_fixture_access(
+        control_plane,
+        subject=fixture["subject"],
+        include="project",
+        mode="pull_only",
+    )
+    assert allow_result == fixture["expected_allow"]
+
+
+def test_context_descriptor_fail_closed_negative_fixtures_stay_denied() -> None:
+    control_plane = _load_control_plane()
+    fixture = _load_fixture("context_descriptor_files_grant_fixture.yaml")
+
+    required_denies = {
+        (
+            case["subject"],
+            case["source_family"],
+            case["scope_or_include"],
+            case["mode"],
+        ): case["degraded_label"]
+        for case in control_plane["evaluator_contract"]["required_deny_examples"]
+        if case["source_family"] == "context_descriptor_files"
+    }
+
+    assert (
+        required_denies[("sax", "context_descriptor_files", "unknown_include", "supervised")]
+        == "source_not_registered"
+    )
+
+    for case in fixture["fail_closed_cases"]:
+        result = _evaluate_context_descriptor_fixture_access(
+            control_plane,
+            subject=case["subject"],
+            include=case["include"],
+            mode=case["mode"],
+            family_enabled=case.get("family_enabled", True),
+        )
+        assert result["decision"] == "deny", case["case_id"]
+        assert result["degraded_label"] == case["expected_degraded_label"], case["case_id"]
+
+    acceptance_cases = control_plane["evaluator_contract"]["evaluator_only_acceptance_cases"]
+    assert (
+        acceptance_cases["sax_context_project_pull_allow"]["expected"]
+        == "allow_metadata_only_exact_descriptor_required_no_path_discovery"
+    )
+    assert (
+        acceptance_cases["sax_unknown_context_include_deny"]["expected_degraded_label"]
+        == "source_not_registered"
+    )
+    assert (
+        acceptance_cases["grant_revocation_deny"]["expected_degraded_label"]
+        == "grant_revoked"
     )

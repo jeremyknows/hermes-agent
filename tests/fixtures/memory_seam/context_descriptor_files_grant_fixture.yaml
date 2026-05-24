@@ -1,0 +1,38 @@
+subject: sax
+source_family: context_descriptor_files
+decision: allow_after_review
+modes: [supervised, pull_only]
+includes: [soul, memory, project, last_session]
+denied_modes: [startup, turn, cron, runtime, write_request]
+posture: local_read_only_default_off_supervised
+expected_allow:
+  decision: allow_metadata
+  redaction_profile: standard_plus_context_sensitive_vocabulary_line_redaction
+  cache_namespace: context_descriptor_files
+fail_closed_cases:
+  - case_id: sax_cron_denied
+    subject: sax
+    include: project
+    mode: cron
+    expected_degraded_label: grant_mode_denied
+  - case_id: builder_supervised_denied
+    subject: builder
+    include: project
+    mode: supervised
+    expected_degraded_label: grant_missing
+  - case_id: unknown_include_denied
+    subject: sax
+    include: unknown_include
+    mode: supervised
+    expected_degraded_label: source_not_registered
+  - case_id: user_include_not_granted
+    subject: sax
+    include: user
+    mode: supervised
+    expected_degraded_label: source_not_registered
+  - case_id: family_disabled_denied
+    subject: sax
+    include: project
+    mode: supervised
+    family_enabled: false
+    expected_degraded_label: source_not_registered
