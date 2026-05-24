@@ -1,0 +1,34 @@
+subject: sax
+source_family: wiki_gbrain
+decision: allow_after_review
+modes: [supervised, pull_only]
+denied_modes: [startup, turn, cron, runtime, write_request]
+posture: local_read_only_default_off_supervised
+expected_allow:
+  decision: allow_metadata
+  redaction_profile: standard_reportable_redaction
+  cache_namespace: wiki_gbrain
+fail_closed_cases:
+  - case_id: sax_cron_denied
+    subject: sax
+    mode: cron
+    expected_degraded_label: grant_mode_denied
+  - case_id: builder_supervised_denied
+    subject: builder
+    mode: supervised
+    expected_degraded_label: grant_missing
+  - case_id: network_runtime_denied
+    subject: network_multi_user_multi_machine
+    mode: runtime
+    expected_degraded_label: verifier_required
+  - case_id: family_disabled_denied
+    subject: sax
+    mode: supervised
+    family_enabled: false
+    expected_degraded_label: source_family_disabled
+  - case_id: public_artifact_lock_denied
+    subject: sax
+    mode: supervised
+    reportable_output_requested: true
+    public_artifact_lock: true
+    expected_degraded_label: public_artifact_locked
