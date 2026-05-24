@@ -1,16 +1,19 @@
-# Memory Seam control-plane v0 draft
+# Hermes compatibility/static enforcement for an external Memory Seam contract
 # Status: Sax-local review artifact / not runtime config / not activation authority
 # Source anchor checked: system-pipes main 63943e95744e94c0457e9a29dcae608a81d7e2fc (PR #38)
 # Last live re-check: 2026-05-24T13:05:13Z
 # Gate posture: Gate 3 remains contract_authoritative / implementation_held
 #
 # Mental model:
-# - Memory Seam is the independence adapter between agent runtimes and memory backends.
+# - Memory Seam is an external contract boundary that keeps agent runtimes
+#   independent from memory backend custody and source ownership.
+# - Hermes compatibility work may statically validate that contract, but this
+#   repo does not become the owner of Memory Seam semantics or custody.
 # - Librarian / Memory City is the custody, curation, front-desk, and write-authority layer.
 # - Source registry is the catalog of allowed shelves.
 # - Grant matrix is the keyring rulebook for which agent gets which keys.
 #
-# This file is intentionally outside runtime load paths. It is a compact control-plane
+# This file is intentionally outside runtime load paths. It is a compact compatibility
 # sketch for review before any implementation wiring.
 version: memory_seam_control_plane_v0_draft
 status: sax_local_review_artifact_not_activation_authority
