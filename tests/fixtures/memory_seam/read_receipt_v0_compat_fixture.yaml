@@ -1,0 +1,86 @@
+fixture_version: memory_seam_read_receipt_v0_fixture
+receipts:
+  - case_id: allow_metadata_receipt
+    receipt_class: allowed_receipt
+    receipt_version: memory_seam_receipt_v0
+    fixture_id: sax_wiki_allow_metadata
+    subject: sax
+    source_family: wiki_gbrain
+    scope_or_include: wiki
+    mode: supervised
+    decision: allow_metadata
+    degraded_label: null
+    redaction_labels: [token_shaped_values, private_absolute_paths]
+    useful_fact_score: 2
+    byte_counts:
+      before: 256
+      after: 128
+      truncated: false
+    latency_bucket: lt_10ms
+    cache_action: none
+    registry_version: memory_seam_control_plane_v0_draft
+    grant_version: grant_matrix_v0_draft
+    backend_callback_count: 1
+  - case_id: denied_before_read_receipt
+    receipt_class: denied_before_read_receipt
+    receipt_version: memory_seam_receipt_v0
+    fixture_id: builder_wiki_deny
+    subject: builder
+    source_family: wiki_gbrain
+    scope_or_include: wiki
+    mode: supervised
+    decision: deny
+    degraded_label: grant_missing
+    redaction_labels: []
+    useful_fact_score: 0
+    byte_counts:
+      before: 0
+      after: 0
+      truncated: false
+    latency_bucket: lt_10ms
+    cache_action: none
+    registry_version: memory_seam_control_plane_v0_draft
+    grant_version: grant_matrix_v0_draft
+    backend_callback_count: 0
+  - case_id: degraded_not_useful_receipt
+    receipt_class: degraded_not_useful_receipt
+    receipt_version: memory_seam_receipt_v0
+    fixture_id: sax_wiki_not_useful
+    subject: sax
+    source_family: wiki_gbrain
+    scope_or_include: wiki
+    mode: supervised
+    decision: degrade_metadata_only
+    degraded_label: not_useful_enough
+    redaction_labels: [freshness_unknown]
+    useful_fact_score: 0
+    byte_counts:
+      before: 96
+      after: 48
+      truncated: true
+    latency_bucket: lt_10ms
+    cache_action: none
+    registry_version: memory_seam_control_plane_v0_draft
+    grant_version: grant_matrix_v0_draft
+    backend_callback_count: 1
+  - case_id: no_authority_no_source_read_receipt
+    receipt_class: no_authority_no_source_read_posture
+    receipt_version: memory_seam_receipt_v0
+    fixture_id: watson_wiki_no_authority
+    subject: watson
+    source_family: wiki_gbrain
+    scope_or_include: wiki
+    mode: supervised
+    decision: deny
+    degraded_label: no_authority
+    redaction_labels: []
+    useful_fact_score: 0
+    byte_counts:
+      before: 0
+      after: 0
+      truncated: false
+    latency_bucket: lt_10ms
+    cache_action: none
+    registry_version: memory_seam_control_plane_v0_draft
+    grant_version: grant_matrix_v0_draft
+    backend_callback_count: 0
