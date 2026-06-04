@@ -271,6 +271,60 @@ def test_memory_seam_context_builds_source_card_safe_detail_v1_cli_args(tmp_path
         "metadata_only",
     ]]
 
+
+def test_memory_seam_context_builds_source_card_safe_detail_v2_cli_args(tmp_path, monkeypatch):
+    script = _script(tmp_path)
+    provider = MemorySeamMemoryProvider(atlas_query_script=str(script))
+    provider.initialize("session-1", hermes_home=str(tmp_path), platform="cli", agent_identity="sax")
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout='{"endpoint":"context","items":[{"source_card_count":6}]}', stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = json.loads(provider.handle_tool_call(
+        "memory_seam_context",
+        {
+            "include": ["project"],
+            "mode": "supervised",
+            "agent": "sax",
+            "fixture_case": "sax_source_card_safe_detail_v2_granted",
+            "read_receipt": "metadata_only",
+        },
+    ))
+
+    assert result["items"][0]["source_card_count"] == 6
+    assert calls[-1][-4:] == ["--fixture-case", "sax_source_card_safe_detail_v2_granted", "--read-receipt", "metadata_only"]
+
+
+def test_memory_seam_context_builds_source_card_safe_detail_all_cli_args(tmp_path, monkeypatch):
+    script = _script(tmp_path)
+    provider = MemorySeamMemoryProvider(atlas_query_script=str(script))
+    provider.initialize("session-1", hermes_home=str(tmp_path), platform="cli", agent_identity="sax")
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout='{"endpoint":"context","items":[{"source_card_count":10}]}', stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = json.loads(provider.handle_tool_call(
+        "memory_seam_context",
+        {
+            "include": ["project"],
+            "mode": "supervised",
+            "agent": "sax",
+            "fixture_case": "sax_source_card_safe_detail_all_granted",
+            "read_receipt": "metadata_only",
+        },
+    ))
+
+    assert result["items"][0]["source_card_count"] == 10
+    assert calls[-1][-4:] == ["--fixture-case", "sax_source_card_safe_detail_all_granted", "--read-receipt", "metadata_only"]
+
 def test_memory_seam_context_denies_startup_turn_modes_before_backend(tmp_path, monkeypatch):
     provider = MemorySeamMemoryProvider(atlas_query_script=str(_script(tmp_path)))
     calls = []
