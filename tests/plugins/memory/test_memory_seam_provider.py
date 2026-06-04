@@ -179,6 +179,56 @@ def test_memory_seam_context_builds_safe_no_live_cli_args(tmp_path, monkeypatch)
     ]]
 
 
+def test_memory_seam_context_trusts_source_card_safe_detail_fixtures(tmp_path, monkeypatch):
+    script = _script(tmp_path)
+    provider = MemorySeamMemoryProvider(atlas_query_script=str(script))
+    provider.initialize("session-1", hermes_home=str(tmp_path), platform="cli")
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout='{"endpoint":"context","items":[]}', stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = json.loads(provider.handle_tool_call(
+        "memory_seam_context",
+        {
+            "include": ["project"],
+            "mode": "supervised",
+            "agent": "sax",
+            "token_subject": "agent:admin",
+            "allowed_scopes": "diary,session",
+            "timeout_ms": 2500,
+            "fixture_case": "sax_source_card_safe_detail_all_granted",
+            "read_receipt": "metadata_only",
+        },
+    ))
+
+    assert result["endpoint"] == "context"
+    assert calls == [[
+        sys.executable,
+        str(script),
+        "memory_seam.context",
+        "--include",
+        "project",
+        "--mode",
+        "supervised",
+        "--agent",
+        "sax",
+        "--token-subject",
+        "agent:sax",
+        "--allowed-scopes",
+        "project",
+        "--timeout-ms",
+        "2500",
+        "--fixture-case",
+        "sax_source_card_safe_detail_all_granted",
+        "--read-receipt",
+        "metadata_only",
+    ]]
+
+
 def test_memory_seam_recall_builds_safe_cli_args(tmp_path, monkeypatch):
     script = _script(tmp_path)
     provider = MemorySeamMemoryProvider(atlas_query_script=str(script))
