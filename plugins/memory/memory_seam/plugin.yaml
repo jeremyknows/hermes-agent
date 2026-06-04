@@ -1,0 +1,3 @@
+name: memory_seam
+version: 0.1.0
+description: "Atlas Memory Seam v0 pull-based provider exposing bounded local read tools via atlas-query CLI."
