@@ -321,10 +321,15 @@ class MemorySeamMemoryProvider(MemoryProvider):
             "sax_project_doc_disabled_grant",
             "sax_project_doc_granted",
             "sax_project_doc_missing_grant",
+            "sax_source_card_deck_granted",
+            "sax_source_card_safe_detail_all_granted",
+            "sax_source_card_safe_detail_v1_granted",
+            "sax_source_card_safe_detail_v2_granted",
         }:
             # Do not forward caller-supplied authority labels. The only v0
             # trusted-authority shape this bundled provider rehearses is the
-            # process-owned Sax project-doc fixture surface from system-pipes.
+            # process-owned Sax project/source-card fixture surface from
+            # system-pipes.
             self._append_optional(cli_args, "--token-subject", "agent:sax")
             self._append_optional(cli_args, "--allowed-scopes", "project")
         self._append_optional_int(cli_args, "--timeout-ms", args.get("timeout_ms"))
