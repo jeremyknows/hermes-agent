@@ -32,6 +32,7 @@ SAX_FIXTURE_CASES = {
     "sax_project_doc_disabled_grant",
     "sax_project_doc_granted",
     "sax_project_doc_missing_grant",
+    "sax_source_card_deck_granted",
 }
 
 
@@ -79,6 +80,7 @@ CONTEXT_SCHEMA = {
                     "sax_project_doc_disabled_grant",
                     "sax_project_doc_granted",
                     "sax_project_doc_missing_grant",
+                    "sax_source_card_deck_granted",
                 ],
                 "description": "Default-off no-live fixture case.",
             },
