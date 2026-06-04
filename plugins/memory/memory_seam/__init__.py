@@ -122,8 +122,10 @@ class MemorySeamMemoryProvider(MemoryProvider):
     """Atlas Memory Seam v0 as a tools-first Hermes memory provider."""
 
     def __init__(self, atlas_query_script: Optional[str] = None):
+        explicit_script = atlas_query_script.strip() if isinstance(atlas_query_script, str) else atlas_query_script
+        self._explicit_atlas_query_script = explicit_script or None
         self._atlas_query_script = (
-            atlas_query_script
+            self._explicit_atlas_query_script
             or os.getenv("MEMORY_SEAM_ATLAS_QUERY_SCRIPT")
             or self._discover_atlas_query_script()
             or self._default_atlas_query_script_hint()
@@ -161,8 +163,12 @@ class MemorySeamMemoryProvider(MemoryProvider):
             return
 
         script = data.get("atlas_query_script")
-        if isinstance(script, str) and script:
-            self._atlas_query_script = script
+        if (
+            self._explicit_atlas_query_script is None
+            and isinstance(script, str)
+            and script.strip()
+        ):
+            self._atlas_query_script = script.strip()
         timeout = data.get("default_timeout_ms")
         if isinstance(timeout, int) and timeout > 0:
             self._timeout_ms = min(timeout, MAX_TIMEOUT_MS)
