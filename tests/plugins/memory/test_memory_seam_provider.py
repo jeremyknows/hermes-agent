@@ -229,6 +229,50 @@ def test_memory_seam_context_trusts_source_card_safe_detail_fixtures(tmp_path, m
     ]]
 
 
+def test_memory_seam_context_defaults_sax_project_to_source_card_deck(tmp_path, monkeypatch):
+    script = _script(tmp_path)
+    provider = MemorySeamMemoryProvider(atlas_query_script=str(script))
+    provider.initialize("session-1", hermes_home=str(tmp_path), platform="discord", agent_identity="sax")
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout='{"endpoint":"context","items":[{"source_card_count":10}]}', stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = json.loads(provider.handle_tool_call(
+        "memory_seam_context",
+        {
+            "include": ["project"],
+            "mode": "startup",
+            "agent": "sax",
+            "read_receipt": "metadata_only",
+        },
+    ))
+
+    assert result["items"][0]["source_card_count"] == 10
+    assert calls == [[
+        sys.executable,
+        str(script),
+        "memory_seam.context",
+        "--include",
+        "project",
+        "--mode",
+        "startup",
+        "--agent",
+        "sax",
+        "--token-subject",
+        "agent:sax",
+        "--allowed-scopes",
+        "project",
+        "--fixture-case",
+        "sax_source_card_safe_detail_all_granted",
+        "--read-receipt",
+        "metadata_only",
+    ]]
+
+
 def test_memory_seam_recall_builds_safe_cli_args(tmp_path, monkeypatch):
     script = _script(tmp_path)
     provider = MemorySeamMemoryProvider(atlas_query_script=str(script))

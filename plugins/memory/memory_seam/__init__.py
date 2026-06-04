@@ -72,6 +72,10 @@ CONTEXT_SCHEMA = {
                     "sax_project_doc_disabled_grant",
                     "sax_project_doc_granted",
                     "sax_project_doc_missing_grant",
+                    "sax_source_card_deck_granted",
+                    "sax_source_card_safe_detail_all_granted",
+                    "sax_source_card_safe_detail_v1_granted",
+                    "sax_source_card_safe_detail_v2_granted",
                 ],
                 "description": "Default-off no-live fixture case.",
             },
@@ -317,6 +321,8 @@ class MemorySeamMemoryProvider(MemoryProvider):
         self._append_optional(cli_args, "--mode", args.get("mode"))
         self._append_optional(cli_args, "--agent", args.get("agent"))
         fixture_case = args.get("fixture_case")
+        if fixture_case is None or fixture_case == "":
+            fixture_case = self._default_context_fixture_case(args, include)
         if fixture_case in {
             "sax_project_doc_disabled_grant",
             "sax_project_doc_granted",
@@ -336,6 +342,35 @@ class MemorySeamMemoryProvider(MemoryProvider):
         self._append_optional(cli_args, "--fixture-case", fixture_case)
         self._append_optional(cli_args, "--read-receipt", args.get("read_receipt"))
         return cli_args
+
+    def _default_context_fixture_case(self, args: Dict[str, Any], include: Optional[str]) -> Optional[str]:
+        """Return the process-owned default Sax source-card context fixture.
+
+        This is intentionally narrow: it only applies to Sax asking for the
+        project include family. Caller-supplied authority labels are still
+        ignored, and other agents/includes stay unauthorised unless a reviewed
+        fixture case is explicitly supplied.
+        """
+        if not self._is_sax_agent(args.get("agent")):
+            return None
+        include_families = {
+            item.strip()
+            for item in (include or "").split(",")
+            if item.strip()
+        }
+        if include_families != {"project"}:
+            return None
+        return "sax_source_card_safe_detail_all_granted"
+
+    def _is_sax_agent(self, requested_agent: Any) -> bool:
+        candidates = [requested_agent, self._agent_identity]
+        for candidate in candidates:
+            if not isinstance(candidate, str):
+                continue
+            normalized = candidate.strip().lower()
+            if normalized in {"sax", "agent:sax"}:
+                return True
+        return False
 
     def _recall_args(self, args: Dict[str, Any]) -> List[str]:
         cli_args = ["--query", str(args["query"])]
