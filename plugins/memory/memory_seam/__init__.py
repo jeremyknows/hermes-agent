@@ -26,6 +26,13 @@ DEFAULT_ATLAS_QUERY_RELATIVE_PATH = Path(
 )
 DEFAULT_TIMEOUT_MS = 1500
 MAX_TIMEOUT_MS = 10000
+CONTEXT_ALLOWED_MODES = {"supervised", "pull_only"}
+CONTEXT_ALLOWED_INCLUDES = {"project"}
+SAX_FIXTURE_CASES = {
+    "sax_project_doc_disabled_grant",
+    "sax_project_doc_granted",
+    "sax_project_doc_missing_grant",
+}
 
 
 HEALTH_SCHEMA = {
@@ -58,8 +65,8 @@ CONTEXT_SCHEMA = {
             },
             "mode": {
                 "type": "string",
-                "enum": ["startup", "turn"],
-                "description": "Context mode.",
+                "enum": ["supervised", "pull_only"],
+                "description": "Reviewed pull-read mode. startup/turn lifecycle modes are denied by v0.",
             },
             "agent": {"type": "string", "description": "Agent label, e.g. sax."},
             "timeout_ms": {
@@ -295,11 +302,9 @@ class MemorySeamMemoryProvider(MemoryProvider):
             return tool_error(f"Memory Seam CLI failed to start: {exc}")
 
         if completed.returncode != 0:
-            detail = (completed.stderr or completed.stdout or "").strip()
             return tool_error(
                 "Memory Seam CLI returned non-zero exit status",
                 returncode=completed.returncode,
-                detail=detail,
             )
 
         stdout = (completed.stdout or "").strip()
@@ -307,24 +312,29 @@ class MemorySeamMemoryProvider(MemoryProvider):
             return tool_error("Memory Seam CLI returned empty output")
         try:
             return tool_result(json.loads(stdout))
-        except json.JSONDecodeError as exc:
-            return tool_error("Memory Seam CLI returned invalid JSON", detail=str(exc))
+        except json.JSONDecodeError:
+            return tool_error("Memory Seam CLI returned invalid JSON")
 
     def _context_args(self, args: Dict[str, Any]) -> List[str]:
         cli_args: List[str] = []
         include = self._join_string_or_list(args.get("include"))
-        self._append_optional(cli_args, "--include", include)
-        self._append_optional(cli_args, "--mode", args.get("mode"))
-        self._append_optional(cli_args, "--agent", args.get("agent"))
+        mode = args.get("mode") or "supervised"
+        if mode not in CONTEXT_ALLOWED_MODES:
+            raise ValueError("memory_seam_context mode must be supervised or pull_only")
+        self._validate_context_includes(include)
         fixture_case = args.get("fixture_case")
-        if fixture_case in {
-            "sax_project_doc_disabled_grant",
-            "sax_project_doc_granted",
-            "sax_project_doc_missing_grant",
-        }:
+        if fixture_case in SAX_FIXTURE_CASES:
+            self._validate_sax_fixture_authority(args.get("agent"))
+        self._append_optional(cli_args, "--include", include)
+        # atlas-query's no-live local CLI still names its parser modes startup/turn.
+        # Hermes exposes only reviewed supervised/pull_only semantics and translates
+        # to the legacy parser labels at the subprocess edge for compatibility.
+        self._append_optional(cli_args, "--mode", "startup" if mode == "supervised" else "turn")
+        self._append_optional(cli_args, "--agent", args.get("agent"))
+        if fixture_case in SAX_FIXTURE_CASES:
             # Do not forward caller-supplied authority labels. The only v0
-            # trusted-authority shape this bundled provider rehearses is the
-            # process-owned Sax project-doc fixture surface from system-pipes.
+            # trusted-authority shape this bundled provider rehearses is derived
+            # from a Sax-initialized Hermes process and constrained to project.
             self._append_optional(cli_args, "--token-subject", "agent:sax")
             self._append_optional(cli_args, "--allowed-scopes", "project")
         self._append_optional_int(cli_args, "--timeout-ms", args.get("timeout_ms"))
@@ -333,6 +343,9 @@ class MemorySeamMemoryProvider(MemoryProvider):
         return cli_args
 
     def _recall_args(self, args: Dict[str, Any]) -> List[str]:
+        scope = args.get("scope") or "wiki"
+        if scope != "wiki":
+            raise ValueError("memory_seam_recall scope must be wiki")
         cli_args = ["--query", str(args["query"])]
         self._append_optional(cli_args, "--scope", "wiki")
         self._append_optional(cli_args, "--agent", args.get("agent"))
@@ -349,6 +362,25 @@ class MemorySeamMemoryProvider(MemoryProvider):
         if isinstance(value, list):
             return ",".join(str(item) for item in value if str(item))
         return None
+
+    @staticmethod
+    def _split_csv(value: Optional[str]) -> List[str]:
+        if not value:
+            return []
+        return [part.strip() for part in value.split(",") if part.strip()]
+
+    @classmethod
+    def _validate_context_includes(cls, include: Optional[str]) -> None:
+        requested = cls._split_csv(include)
+        unknown = [item for item in requested if item not in CONTEXT_ALLOWED_INCLUDES]
+        if unknown:
+            raise ValueError("memory_seam_context include is limited to project")
+
+    def _validate_sax_fixture_authority(self, agent: Any) -> None:
+        derived_agent = self._agent_identity.strip().lower()
+        requested_agent = str(agent).strip().lower() if agent not in (None, "") else derived_agent
+        if derived_agent != "sax" or requested_agent != "sax":
+            raise ValueError("memory_seam_context Sax fixture cases are Sax-only")
 
     @staticmethod
     def _append_optional(cli_args: List[str], flag: str, value: Any) -> None:

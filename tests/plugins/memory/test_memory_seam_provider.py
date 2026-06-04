@@ -92,6 +92,8 @@ def test_memory_seam_provider_exposes_only_read_only_tools(tmp_path):
     assert "write" not in schema_text.lower()
     assert "reindex" not in schema_text.lower()
     assert "publish" not in schema_text.lower()
+    context_mode = schemas[1]["parameters"]["properties"]["mode"]
+    assert context_mode["enum"] == ["supervised", "pull_only"]
 
 
 def test_memory_seam_provider_pull_mode_lifecycle_is_inert(tmp_path):
@@ -129,10 +131,10 @@ def test_memory_seam_health_routes_to_local_cli_subprocess(tmp_path, monkeypatch
     assert calls == [[sys.executable, str(script), "memory_seam.health"]]
 
 
-def test_memory_seam_context_builds_safe_no_live_cli_args(tmp_path, monkeypatch):
+def test_memory_seam_context_builds_derived_sax_no_live_cli_args(tmp_path, monkeypatch):
     script = _script(tmp_path)
     provider = MemorySeamMemoryProvider(atlas_query_script=str(script))
-    provider.initialize("session-1", hermes_home=str(tmp_path), platform="cli")
+    provider.initialize("session-1", hermes_home=str(tmp_path), platform="cli", agent_identity="sax")
     calls = []
 
     def fake_run(cmd, **kwargs):
@@ -145,7 +147,7 @@ def test_memory_seam_context_builds_safe_no_live_cli_args(tmp_path, monkeypatch)
         "memory_seam_context",
         {
             "include": ["project"],
-            "mode": "startup",
+            "mode": "supervised",
             "agent": "sax",
             "token_subject": "agent:admin",
             "allowed_scopes": "diary,session",
@@ -179,7 +181,71 @@ def test_memory_seam_context_builds_safe_no_live_cli_args(tmp_path, monkeypatch)
     ]]
 
 
-def test_memory_seam_recall_builds_safe_cli_args(tmp_path, monkeypatch):
+def test_memory_seam_context_denies_startup_turn_modes_before_backend(tmp_path, monkeypatch):
+    provider = MemorySeamMemoryProvider(atlas_query_script=str(_script(tmp_path)))
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout='{}', stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    for mode in ["startup", "turn", "cron", "runtime"]:
+        result = json.loads(provider.handle_tool_call("memory_seam_context", {"mode": mode}))
+        assert "error" in result
+        assert "supervised or pull_only" in result["error"]
+
+    assert calls == []
+
+
+def test_memory_seam_context_denies_non_sax_fixture_subject_before_backend(tmp_path, monkeypatch):
+    provider = MemorySeamMemoryProvider(atlas_query_script=str(_script(tmp_path)))
+    provider.initialize("session-1", hermes_home=str(tmp_path), platform="cli", agent_identity="watson")
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout='{}', stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = json.loads(provider.handle_tool_call(
+        "memory_seam_context",
+        {
+            "include": ["project"],
+            "mode": "supervised",
+            "fixture_case": "sax_project_doc_granted",
+        },
+    ))
+
+    assert "error" in result
+    assert "Sax-only" in result["error"]
+    assert calls == []
+
+
+def test_memory_seam_context_denies_unknown_include_before_backend(tmp_path, monkeypatch):
+    provider = MemorySeamMemoryProvider(atlas_query_script=str(_script(tmp_path)))
+    provider.initialize("session-1", hermes_home=str(tmp_path), platform="cli", agent_identity="sax")
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout='{}', stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = json.loads(provider.handle_tool_call(
+        "memory_seam_context",
+        {"include": ["project", "diary"], "mode": "supervised"},
+    ))
+
+    assert "error" in result
+    assert "project" in result["error"]
+    assert calls == []
+
+
+def test_memory_seam_recall_builds_wiki_only_cli_args(tmp_path, monkeypatch):
     script = _script(tmp_path)
     provider = MemorySeamMemoryProvider(atlas_query_script=str(script))
     provider.initialize("session-1", hermes_home=str(tmp_path), platform="cli")
@@ -195,7 +261,7 @@ def test_memory_seam_recall_builds_safe_cli_args(tmp_path, monkeypatch):
         "memory_seam_recall",
         {
             "query": "memory seam boundary",
-            "scope": "diary",
+            "scope": "wiki",
             "agent": "sax",
             "token_subject": "agent:admin",
             "allowed_scopes": "diary,session",
@@ -226,6 +292,26 @@ def test_memory_seam_recall_builds_safe_cli_args(tmp_path, monkeypatch):
         "--read-receipt",
         "metadata_only",
     ]]
+
+
+def test_memory_seam_recall_rejects_non_wiki_scope_before_backend(tmp_path, monkeypatch):
+    provider = MemorySeamMemoryProvider(atlas_query_script=str(_script(tmp_path)))
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout='{}', stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = json.loads(provider.handle_tool_call(
+        "memory_seam_recall",
+        {"query": "memory seam", "scope": "diary"},
+    ))
+
+    assert "error" in result
+    assert "wiki" in result["error"]
+    assert calls == []
 
 
 def test_memory_seam_provider_rejects_unknown_or_write_like_tools(tmp_path):
@@ -286,6 +372,8 @@ def test_memory_seam_provider_clamps_timeout_for_cli_and_subprocess(tmp_path, mo
         sys.executable,
         str(script),
         "memory_seam.context",
+        "--mode",
+        "startup",
         "--timeout-ms",
         "10000",
     ]
@@ -311,11 +399,11 @@ def test_memory_seam_provider_rejects_bad_health_timeout(tmp_path, monkeypatch):
     assert calls == []
 
 
-def test_memory_seam_provider_reports_cli_non_zero_exit(tmp_path, monkeypatch):
+def test_memory_seam_provider_reports_cli_non_zero_exit_without_raw_detail(tmp_path, monkeypatch):
     provider = MemorySeamMemoryProvider(atlas_query_script=str(_script(tmp_path)))
 
     def fake_run(cmd, **kwargs):
-        return subprocess.CompletedProcess(cmd, 7, stdout="", stderr="boom")
+        return subprocess.CompletedProcess(cmd, 7, stdout="", stderr="boom /private/path/token")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
 
@@ -323,7 +411,8 @@ def test_memory_seam_provider_reports_cli_non_zero_exit(tmp_path, monkeypatch):
 
     assert result["error"] == "Memory Seam CLI returned non-zero exit status"
     assert result["returncode"] == 7
-    assert result["detail"] == "boom"
+    assert "detail" not in result
+    assert "boom" not in json.dumps(result)
 
 
 def test_memory_seam_provider_reports_cli_empty_output(tmp_path, monkeypatch):
@@ -339,7 +428,7 @@ def test_memory_seam_provider_reports_cli_empty_output(tmp_path, monkeypatch):
     assert result["error"] == "Memory Seam CLI returned empty output"
 
 
-def test_memory_seam_provider_reports_cli_invalid_json(tmp_path, monkeypatch):
+def test_memory_seam_provider_reports_cli_invalid_json_without_raw_detail(tmp_path, monkeypatch):
     provider = MemorySeamMemoryProvider(atlas_query_script=str(_script(tmp_path)))
 
     def fake_run(cmd, **kwargs):
@@ -350,7 +439,8 @@ def test_memory_seam_provider_reports_cli_invalid_json(tmp_path, monkeypatch):
     result = json.loads(provider.handle_tool_call("memory_seam_health", {}))
 
     assert result["error"] == "Memory Seam CLI returned invalid JSON"
-    assert "Expecting value" in result["detail"]
+    assert "detail" not in result
+    assert "not-json" not in json.dumps(result)
 
 
 def test_memory_seam_provider_clamps_configured_default_timeout(tmp_path, monkeypatch):
