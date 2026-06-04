@@ -56,10 +56,27 @@ def test_memory_seam_provider_is_available_uses_effective_profile_config_pre_ini
     )
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
 
-    provider = MemorySeamMemoryProvider(atlas_query_script=str(tmp_path / "missing.py"))
+    provider = MemorySeamMemoryProvider()
 
     assert provider.is_available() is True
     assert provider._atlas_query_script == str(script)
+
+
+def test_memory_seam_provider_explicit_script_beats_profile_config_during_availability_probe(tmp_path, monkeypatch):
+    explicit = tmp_path / "explicit.py"
+    explicit.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+    configured = tmp_path / "configured.py"
+    configured.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+    (tmp_path / "memory_seam.json").write_text(
+        json.dumps({"atlas_query_script": str(configured)}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+
+    provider = MemorySeamMemoryProvider(atlas_query_script=str(explicit))
+
+    assert provider.is_available() is True
+    assert provider._atlas_query_script == str(explicit)
 
 
 def test_memory_seam_provider_exposes_only_read_only_tools(tmp_path):
