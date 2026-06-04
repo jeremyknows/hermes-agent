@@ -226,6 +226,51 @@ def test_memory_seam_context_builds_source_card_deck_cli_args(tmp_path, monkeypa
     ]]
 
 
+
+def test_memory_seam_context_builds_source_card_safe_detail_v1_cli_args(tmp_path, monkeypatch):
+    script = _script(tmp_path)
+    provider = MemorySeamMemoryProvider(atlas_query_script=str(script))
+    provider.initialize("session-1", hermes_home=str(tmp_path), platform="cli", agent_identity="sax")
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout='{"endpoint":"context","items":[{"source_card_count":4}]}', stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = json.loads(provider.handle_tool_call(
+        "memory_seam_context",
+        {
+            "include": ["project"],
+            "mode": "supervised",
+            "agent": "sax",
+            "fixture_case": "sax_source_card_safe_detail_v1_granted",
+            "read_receipt": "metadata_only",
+        },
+    ))
+
+    assert result["items"][0]["source_card_count"] == 4
+    assert calls == [[
+        sys.executable,
+        str(script),
+        "memory_seam.context",
+        "--include",
+        "project",
+        "--mode",
+        "startup",
+        "--agent",
+        "sax",
+        "--token-subject",
+        "agent:sax",
+        "--allowed-scopes",
+        "project",
+        "--fixture-case",
+        "sax_source_card_safe_detail_v1_granted",
+        "--read-receipt",
+        "metadata_only",
+    ]]
+
 def test_memory_seam_context_denies_startup_turn_modes_before_backend(tmp_path, monkeypatch):
     provider = MemorySeamMemoryProvider(atlas_query_script=str(_script(tmp_path)))
     calls = []
