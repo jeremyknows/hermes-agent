@@ -16,12 +16,13 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from agent.memory_provider import MemoryProvider
+from hermes_constants import get_default_hermes_root, get_hermes_home
 from tools.registry import tool_error, tool_result
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_ATLAS_QUERY_SCRIPT = (
-    "/Users/watson/projects/system-pipes/scripts/atlas-query/atlas-query.mcp.py"
+DEFAULT_ATLAS_QUERY_RELATIVE_PATH = Path(
+    "projects/system-pipes/scripts/atlas-query/atlas-query.mcp.py"
 )
 DEFAULT_TIMEOUT_MS = 1500
 MAX_TIMEOUT_MS = 10000
@@ -124,7 +125,8 @@ class MemorySeamMemoryProvider(MemoryProvider):
         self._atlas_query_script = (
             atlas_query_script
             or os.getenv("MEMORY_SEAM_ATLAS_QUERY_SCRIPT")
-            or DEFAULT_ATLAS_QUERY_SCRIPT
+            or self._discover_atlas_query_script()
+            or self._default_atlas_query_script_hint()
         )
         self._session_id = ""
         self._hermes_home = ""
@@ -138,6 +140,7 @@ class MemorySeamMemoryProvider(MemoryProvider):
         return "memory_seam"
 
     def is_available(self) -> bool:
+        self._load_profile_config()
         return Path(self._atlas_query_script).is_file()
 
     def initialize(self, session_id: str, **kwargs) -> None:
@@ -148,9 +151,7 @@ class MemorySeamMemoryProvider(MemoryProvider):
         self._load_profile_config()
 
     def _load_profile_config(self) -> None:
-        if not self._hermes_home:
-            return
-        config_path = Path(self._hermes_home) / "memory_seam.json"
+        config_path = self._config_path()
         if not config_path.is_file():
             return
         try:
@@ -166,6 +167,32 @@ class MemorySeamMemoryProvider(MemoryProvider):
         if isinstance(timeout, int) and timeout > 0:
             self._timeout_ms = min(timeout, MAX_TIMEOUT_MS)
         self._auto_prefetch = bool(data.get("auto_prefetch", False))
+
+    def save_config(self, values: Dict[str, Any], hermes_home: str) -> None:
+        config_path = self._config_path(hermes_home)
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+
+        data: Dict[str, Any] = {}
+        if config_path.is_file():
+            try:
+                existing = json.loads(config_path.read_text(encoding="utf-8"))
+                if isinstance(existing, dict):
+                    data = existing
+            except Exception as exc:
+                logger.debug("Failed to read existing Memory Seam provider config: %s", exc)
+
+        script = values.get("atlas_query_script")
+        if script is not None and str(script).strip():
+            data["atlas_query_script"] = str(script).strip()
+
+        timeout = values.get("default_timeout_ms")
+        if timeout is not None and timeout != "":
+            data["default_timeout_ms"] = self._coerce_positive_config_int(
+                timeout,
+                "default_timeout_ms",
+            )
+
+        config_path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
     def prefetch(self, query: str, *, session_id: str = "") -> str:
         # v0 is pull-based.  This remains inert even if config accidentally sets
@@ -211,7 +238,7 @@ class MemorySeamMemoryProvider(MemoryProvider):
                 "key": "atlas_query_script",
                 "description": "Path to atlas-query.mcp.py for local Memory Seam calls",
                 "required": False,
-                "default": DEFAULT_ATLAS_QUERY_SCRIPT,
+                "default": self._atlas_query_script,
             },
             {
                 "key": "default_timeout_ms",
@@ -355,6 +382,35 @@ class MemorySeamMemoryProvider(MemoryProvider):
         if value is None or value == "":
             return min(self._timeout_ms, MAX_TIMEOUT_MS)
         return self._coerce_int_arg(value, "--timeout-ms")
+
+    @staticmethod
+    def _default_atlas_query_script_hint() -> str:
+        return str(get_default_hermes_root().parent / DEFAULT_ATLAS_QUERY_RELATIVE_PATH)
+
+    @staticmethod
+    def _discover_atlas_query_script() -> Optional[str]:
+        candidates = [
+            get_default_hermes_root().parent / DEFAULT_ATLAS_QUERY_RELATIVE_PATH,
+            Path.home() / DEFAULT_ATLAS_QUERY_RELATIVE_PATH,
+        ]
+        for candidate in candidates:
+            if candidate.is_file():
+                return str(candidate)
+        return None
+
+    def _config_path(self, hermes_home: Optional[str] = None) -> Path:
+        home = hermes_home or self._hermes_home or str(get_hermes_home())
+        return Path(home) / "memory_seam.json"
+
+    @staticmethod
+    def _coerce_positive_config_int(value: Any, label: str) -> int:
+        try:
+            coerced = int(value)
+        except (TypeError, ValueError):
+            raise ValueError(f"Invalid integer for {label}")
+        if coerced <= 0:
+            raise ValueError(f"Invalid integer for {label}")
+        return min(coerced, MAX_TIMEOUT_MS)
 
 
 def register(ctx) -> None:

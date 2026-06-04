@@ -29,6 +29,39 @@ def test_memory_seam_provider_is_local_only_available(tmp_path):
     assert missing.is_available() is False
 
 
+def test_memory_seam_provider_persists_native_config(tmp_path):
+    script = _script(tmp_path)
+    provider = MemorySeamMemoryProvider()
+
+    provider.save_config(
+        {
+            "atlas_query_script": str(script),
+            "default_timeout_ms": "2500",
+        },
+        str(tmp_path),
+    )
+
+    saved = json.loads((tmp_path / "memory_seam.json").read_text(encoding="utf-8"))
+    assert saved == {
+        "atlas_query_script": str(script),
+        "default_timeout_ms": 2500,
+    }
+
+
+def test_memory_seam_provider_is_available_uses_effective_profile_config_pre_initialize(tmp_path, monkeypatch):
+    script = _script(tmp_path)
+    (tmp_path / "memory_seam.json").write_text(
+        json.dumps({"atlas_query_script": str(script)}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+
+    provider = MemorySeamMemoryProvider(atlas_query_script=str(tmp_path / "missing.py"))
+
+    assert provider.is_available() is True
+    assert provider._atlas_query_script == str(script)
+
+
 def test_memory_seam_provider_exposes_only_read_only_tools(tmp_path):
     provider = MemorySeamMemoryProvider(atlas_query_script=str(_script(tmp_path)))
     schemas = provider.get_tool_schemas()
@@ -259,6 +292,48 @@ def test_memory_seam_provider_rejects_bad_health_timeout(tmp_path, monkeypatch):
     assert "error" in result
     assert "Invalid integer" in result["error"]
     assert calls == []
+
+
+def test_memory_seam_provider_reports_cli_non_zero_exit(tmp_path, monkeypatch):
+    provider = MemorySeamMemoryProvider(atlas_query_script=str(_script(tmp_path)))
+
+    def fake_run(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 7, stdout="", stderr="boom")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = json.loads(provider.handle_tool_call("memory_seam_health", {}))
+
+    assert result["error"] == "Memory Seam CLI returned non-zero exit status"
+    assert result["returncode"] == 7
+    assert result["detail"] == "boom"
+
+
+def test_memory_seam_provider_reports_cli_empty_output(tmp_path, monkeypatch):
+    provider = MemorySeamMemoryProvider(atlas_query_script=str(_script(tmp_path)))
+
+    def fake_run(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 0, stdout="   ", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = json.loads(provider.handle_tool_call("memory_seam_health", {}))
+
+    assert result["error"] == "Memory Seam CLI returned empty output"
+
+
+def test_memory_seam_provider_reports_cli_invalid_json(tmp_path, monkeypatch):
+    provider = MemorySeamMemoryProvider(atlas_query_script=str(_script(tmp_path)))
+
+    def fake_run(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 0, stdout="not-json", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = json.loads(provider.handle_tool_call("memory_seam_health", {}))
+
+    assert result["error"] == "Memory Seam CLI returned invalid JSON"
+    assert "Expecting value" in result["detail"]
 
 
 def test_memory_seam_provider_clamps_configured_default_timeout(tmp_path, monkeypatch):
